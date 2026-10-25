@@ -307,7 +307,7 @@ func findNestedList(n *html.Node) *html.Node {
 
 // collapseWhitespace collapses runs of whitespace into single spaces and trims.
 func collapseWhitespace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	return strings.Join(whiteSpaceFields(s), " ")
 }
 
 // collapseWhitespaceInline collapses runs of whitespace into single spaces
@@ -318,7 +318,7 @@ func collapseWhitespace(s string) string {
 // in inline formatting contexts (collectRuns) where boundary whitespace
 // signals inter-word spacing between adjacent styled runs.
 func collapseWhitespaceInline(s string) string {
-	collapsed := strings.Join(strings.Fields(s), " ")
+	collapsed := strings.Join(whiteSpaceFields(s), " ")
 	if collapsed == "" {
 		// Whitespace-only text node: preserve as a single space so it
 		// maintains inter-element spacing (e.g. "<b>bold</b> <i>italic</i>").
@@ -401,7 +401,7 @@ func processWhitespace(s, whiteSpace string) string {
 			if i > 0 {
 				sb.WriteByte('\n')
 			}
-			sb.WriteString(strings.Join(strings.Fields(line), " "))
+			sb.WriteString(strings.Join(whiteSpaceFields(line), " "))
 		}
 		return strings.TrimSpace(sb.String())
 	default: // "normal", "nowrap"
@@ -925,4 +925,13 @@ func (c *converter) resolveBackgroundImage(style computedStyle) *layout.Backgrou
 	}
 
 	return bgImg
+}
+
+// whiteSpaceFields splits s around runs of CSS document white space
+// (space, tab, LF, CR, FF). strings.Fields would also split on U+00A0,
+// collapsing &nbsp; runs and turning them into break opportunities.
+func whiteSpaceFields(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	})
 }

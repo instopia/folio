@@ -5,6 +5,7 @@ package layout
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/carlos7ags/folio/font"
@@ -487,7 +488,7 @@ func splitWords(text string) []string {
 		if i > 0 {
 			result = append(result, lineBreakMarker)
 		}
-		result = append(result, strings.Fields(line)...)
+		result = append(result, breakFields(line)...)
 	}
 	return result
 }
@@ -523,4 +524,20 @@ func isPunctuation(r rune) bool {
 // isSpace reports whether r is a whitespace character.
 func isSpace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+}
+
+// breakFields splits s into words around white space like strings.Fields,
+// except that the no-break spaces (U+00A0, U+2007, U+202F) stay inside
+// words: a non-breaking space is not a line-break opportunity (UAX #14
+// class GL), so "$5,000&nbsp;each" never wraps at the space.
+func breakFields(s string) []string {
+	return strings.FieldsFunc(s, isBreakSpace)
+}
+
+func isBreakSpace(r rune) bool {
+	switch r {
+	case '\u00A0', '\u2007', '\u202F':
+		return false
+	}
+	return unicode.IsSpace(r)
 }

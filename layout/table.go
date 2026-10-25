@@ -5,7 +5,6 @@ package layout
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/carlos7ags/folio/content"
 	"github.com/carlos7ags/folio/font"
@@ -1034,7 +1033,7 @@ func (t *Table) cellContentHeightUncached(gc *gridCell) float64 {
 	}
 
 	// Count wrapped lines.
-	words := strings.Fields(cell.text)
+	words := breakFields(cell.text)
 	if len(words) == 0 {
 		return cell.fontSize*1.2 + padH
 	}
@@ -2091,7 +2090,7 @@ func drawCellTextDirect(ctx DrawContext, cell *Cell, cellX, cellTopY, cellW, cel
 		return
 	}
 
-	words := strings.Fields(cell.text)
+	words := breakFields(cell.text)
 	if len(words) == 0 {
 		return
 	}
