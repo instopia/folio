@@ -54,6 +54,16 @@ type Options struct {
 	// trusted, are parsed once per conversion and do not count towards
 	// MaxTotalAssetBytes.
 	DefaultFont *FontFamily
+	// FontFamilies are in-memory font families by CSS family name
+	// (matched case-insensitively), including the generic names "serif",
+	// "sans-serif" and "monospace". A font-family list resolves to its
+	// first family that has an @font-face rule or an entry here; failing
+	// that, to the entry for the list's generic class (the class of the
+	// first family that names one, so "Georgia, 'Times New Roman',
+	// serif" is serif), and then to DefaultFont. Like DefaultFont the
+	// bytes are trusted, parsed once per process (keep the same slices)
+	// and do not count towards MaxTotalAssetBytes.
+	FontFamilies map[string]*FontFamily
 	// FallbackFonts are in-memory fonts (TTF/OTF/TTC bytes), tried in
 	// order, for characters the primary font has no glyph for — CJK,
 	// other scripts, emoji. Each character is set in the first font that
@@ -187,6 +197,7 @@ func (o *Options) defaults() Options {
 	out.BaseFS = o.BaseFS
 	out.FallbackFontPath = o.FallbackFontPath
 	out.DefaultFont = o.DefaultFont
+	out.FontFamilies = o.FontFamilies
 	out.FallbackFonts = o.FallbackFonts
 	out.DisableSystemFonts = o.DisableSystemFonts
 	out.URLPolicy = o.URLPolicy

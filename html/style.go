@@ -8,7 +8,8 @@ import "github.com/carlos7ags/folio/layout"
 // computedStyle holds the resolved CSS properties for a single HTML node.
 type computedStyle struct {
 	// Text
-	FontFamily           string // "helvetica", "courier", "times"
+	FontFamily           string   // "helvetica", "courier", "times"
+	FontFamilies         []string // the whole font-family list (FontFamily is its first entry)
 	FontSize             float64
 	FontWeight           int    // CSS Fonts L4 numeric ladder (100..900). 400 = normal, 700 = bold. 0 means "not set" (treated as 400).
 	FontStyle            string // "normal", "italic"
@@ -510,6 +511,7 @@ func defaultStyle() computedStyle {
 func (s *computedStyle) inherit() computedStyle {
 	child := computedStyle{
 		FontFamily:           s.FontFamily,
+		FontFamilies:         s.FontFamilies,
 		FontSize:             s.FontSize,
 		FontWeight:           s.FontWeight,
 		FontStyle:            s.FontStyle,

@@ -161,7 +161,7 @@ var cssProperties = []cssProperty{
 		Name: "font-family", Category: "Typography",
 		Values: []string{"<family-name>", "<generic-family>"},
 		Apply: func(s *computedStyle, value string) {
-			s.FontFamily = parseFontFamily(value)
+			setFontFamily(s, value)
 		},
 	},
 	{
@@ -1495,7 +1495,7 @@ var cssProperties = []cssProperty{
 				}
 			}
 			if ff != "" {
-				s.FontFamily = ff
+				setFontFamily(s, ff)
 			}
 		},
 	},

@@ -791,6 +791,69 @@ func parseFontFamily(value string) string {
 	return value
 }
 
+// parseFontFamilyList normalizes a CSS font-family value into its
+// families in order: lowercased, trimmed and unquoted, empty entries
+// dropped.
+func parseFontFamilyList(value string) []string {
+	var out []string
+	for _, f := range strings.Split(strings.ToLower(value), ",") {
+		f = strings.Trim(strings.TrimSpace(f), `"'`)
+		f = strings.TrimSpace(f)
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// setFontFamily applies a font-family value: FontFamily keeps the first
+// family (as before), FontFamilies the whole list for fallback.
+func setFontFamily(s *computedStyle, value string) {
+	s.FontFamily = parseFontFamily(value)
+	s.FontFamilies = parseFontFamilyList(value)
+}
+
+// familyList is the font-family list in effect for style: the declared
+// list, or just FontFamily when that was set directly (the UA default
+// "courier" for <pre>/<code>) and no longer heads the list.
+func familyList(style computedStyle) []string {
+	if len(style.FontFamilies) > 0 && style.FontFamilies[0] == style.FontFamily {
+		return style.FontFamilies
+	}
+	if style.FontFamily == "" {
+		return nil
+	}
+	return []string{style.FontFamily}
+}
+
+// classifyFontFamily is the standard family a single CSS family name
+// stands for, or "" when the name says nothing about it (an unknown
+// family such as "georgia" — the next family in the list decides).
+func classifyFontFamily(family string) string {
+	switch {
+	case strings.Contains(family, "courier") || strings.Contains(family, "monospace") || family == "mono":
+		return "courier"
+	case strings.Contains(family, "times") || strings.Contains(family, "serif") && !strings.Contains(family, "sans"):
+		return "times"
+	case strings.Contains(family, "sans") || strings.Contains(family, "helvetica") || strings.Contains(family, "arial") || family == "system-ui":
+		return "helvetica"
+	}
+	return ""
+}
+
+// standardFamilyFor maps a font-family list to the standard PDF family
+// it falls back to: the first family that names one ("Georgia, 'Times
+// New Roman', serif" is times, as in a browser without Georgia), else
+// helvetica.
+func standardFamilyFor(families []string) string {
+	for _, f := range families {
+		if c := classifyFontFamily(f); c != "" {
+			return c
+		}
+	}
+	return "helvetica"
+}
+
 // mapToStandardFamily maps a CSS font-family name to one of the three
 // standard PDF font families: "courier", "times", or "helvetica".
 // This is used as the final fallback when no @font-face match is found.
@@ -815,7 +878,7 @@ func parseFontShorthand(value string, parentSize float64) (style string, weight 
 	if m, ok := lh.multiplier(size); ok {
 		lineHeight = m
 	}
-	return style, weight, size, lineHeight, family
+	return style, weight, size, lineHeight, parseFontFamily(family)
 }
 
 // parseFontShorthandFull is [parseFontShorthand] with the line-height kept
@@ -885,9 +948,10 @@ func parseFontShorthandFull(value string, parentSize float64) (style string, wei
 		size = parentSize
 	}
 
-	// Remaining parts are font-family.
+	// Remaining parts are font-family (the raw list: parseFontFamily
+	// and parseFontFamilyList normalise it).
 	if idx < len(parts) {
-		family = parseFontFamily(strings.Join(parts[idx:], " "))
+		family = strings.TrimSpace(strings.Join(parts[idx:], " "))
 	}
 
 	return style, weight, size, lh, family, invalidLH

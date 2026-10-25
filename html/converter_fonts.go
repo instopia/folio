@@ -104,10 +104,29 @@ const defaultFontFamily = "\x00default"
 // embeddedFonts under defaultFontFamily, keyed like @font-face faces so
 // resolveFontPair's nearest-weight matching applies to them unchanged.
 func (c *converter) loadDefaultFont() {
-	df := c.opts.DefaultFont
-	if df == nil {
-		return
+	if df := c.opts.DefaultFont; df != nil {
+		if c.registerFamily(defaultFontFamily, df, "DefaultFont") {
+			c.hasDefaultFont = true
+		}
 	}
+	for name, ff := range c.opts.FontFamilies {
+		if ff != nil {
+			c.registerFamily(optionFamilyKey(strings.ToLower(strings.TrimSpace(name))), ff, "FontFamilies")
+		}
+	}
+}
+
+// optionFamilyKey is the reserved embeddedFonts family under which an
+// Options.FontFamilies entry is registered, kept apart from @font-face
+// families (an @font-face rule for the same name wins, as it is matched
+// first).
+func optionFamilyKey(name string) string { return "\x00family:" + name }
+
+// registerFamily registers ff's variants in embeddedFonts under key,
+// keyed like @font-face faces so nearest-weight matching applies to them
+// unchanged. It reports whether any variant registered.
+func (c *converter) registerFamily(key string, df *FontFamily, label string) bool {
+	ok := false
 	variants := []struct {
 		data   []byte
 		weight int
@@ -125,13 +144,13 @@ func (c *converter) loadDefaultFont() {
 		}
 		face, err := parseSharedFont(v.data, c.metadata.Language)
 		if err != nil {
-			c.reportAssetError("DefaultFont", err, "variant", v.name)
+			c.reportAssetError(label, err, "variant", v.name)
 			continue
 		}
-		key := defaultFontFamily + "|" + strconv.Itoa(v.weight) + "|" + v.style
-		c.embeddedFonts[key] = font.NewEmbeddedFont(face)
-		c.hasDefaultFont = true
+		c.embeddedFonts[key+"|"+strconv.Itoa(v.weight)+"|"+v.style] = font.NewEmbeddedFont(face)
+		ok = true
 	}
+	return ok
 }
 
 // fallbackFaces returns the fallback chain for characters the primary
@@ -159,18 +178,18 @@ func (c *converter) fallbackFaces() []*font.EmbeddedFont {
 
 // splitsEmbedded reports whether text set in the embedded font emb is
 // split by glyph coverage onto the fallback chain. That is the case for
-// the caller-supplied default family and whenever the caller supplied
+// the caller-supplied default family and FontFamilies, and whenever the caller supplied
 // FallbackFonts; an @font-face font otherwise renders all of its text
 // itself (missing glyphs show as .notdef), as it always has.
 func (c *converter) splitsEmbedded(emb *font.EmbeddedFont) bool {
 	if len(c.opts.FallbackFonts) > 0 {
 		return true
 	}
-	if !c.hasDefaultFont {
+	if !c.hasDefaultFont && len(c.opts.FontFamilies) == 0 {
 		return false
 	}
 	for k, ef := range c.embeddedFonts {
-		if ef == emb && strings.HasPrefix(k, defaultFontFamily+"|") {
+		if ef == emb && (strings.HasPrefix(k, defaultFontFamily+"|") || strings.HasPrefix(k, optionFamilyKey(""))) {
 			return true
 		}
 	}

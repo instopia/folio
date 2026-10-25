@@ -33,7 +33,7 @@ func resolveFont(style computedStyle) *font.Standard {
 	bold := weight >= 600
 	italic := style.FontStyle == "italic"
 
-	switch mapToStandardFamily(style.FontFamily) {
+	switch standardFamilyFor(familyList(style)) {
 	case "courier":
 		switch {
 		case bold && italic:
@@ -77,7 +77,7 @@ func resolveFont(style computedStyle) *font.Standard {
 // standard PDF-14 fallback.
 func (c *converter) resolveFontPair(style computedStyle) (*font.Standard, *font.EmbeddedFont) {
 	if len(c.embeddedFonts) > 0 {
-		family := strings.ToLower(style.FontFamily)
+		families := familyList(style)
 		fontStyle := style.FontStyle
 		if fontStyle == "" {
 			fontStyle = "normal"
@@ -86,13 +86,27 @@ func (c *converter) resolveFontPair(style computedStyle) (*font.Standard, *font.
 		if desired == 0 {
 			desired = 400
 		}
-		if ef := c.matchEmbeddedFamily(family, fontStyle, desired); ef != nil {
+		// The first family in the list with an @font-face rule or an
+		// Options.FontFamilies entry wins (CSS font fallback).
+		for _, family := range families {
+			family = strings.ToLower(family)
+			if ef := c.matchEmbeddedFamily(family, fontStyle, desired); ef != nil {
+				return nil, ef
+			}
+			if ef := c.matchEmbeddedFamily(optionFamilyKey(family), fontStyle, desired); ef != nil {
+				return nil, ef
+			}
+		}
+		// Otherwise the list's generic class picks the caller's family
+		// for it: Options.FontFamilies["serif"] / ["monospace"], else
+		// Options.DefaultFont for sans and serif (monospace keeps
+		// Courier).
+		class := standardFamilyFor(families)
+		generic := map[string]string{"times": "serif", "courier": "monospace", "helvetica": "sans-serif"}[class]
+		if ef := c.matchEmbeddedFamily(optionFamilyKey(generic), fontStyle, desired); ef != nil {
 			return nil, ef
 		}
-		// No @font-face for the family: the caller's default family
-		// (Options.DefaultFont) replaces the standard sans and serif
-		// fonts. Monospace keeps Courier.
-		if c.hasDefaultFont && mapToStandardFamily(family) != "courier" {
+		if c.hasDefaultFont && class != "courier" {
 			if ef := c.matchEmbeddedFamily(defaultFontFamily, fontStyle, desired); ef != nil {
 				return nil, ef
 			}
