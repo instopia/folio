@@ -14,6 +14,7 @@ type ImageElement struct {
 	img            *folioimage.Image
 	width          float64 // explicit width (0 = auto)
 	height         float64 // explicit height (0 = auto)
+	widthPct       float64 // width as a percentage of the available width (0 = none)
 	cssMaxWidth    float64 // CSS max-width upper bound (0 = unbounded)
 	cssMaxHeight   float64 // CSS max-height upper bound (0 = unbounded)
 	cssMinWidth    float64 // CSS min-width lower bound (0 = no minimum)
@@ -39,6 +40,15 @@ func NewImageElement(img *folioimage.Image) *ImageElement {
 func (ie *ImageElement) SetSize(width, height float64) *ImageElement {
 	ie.width = width
 	ie.height = height
+	return ie
+}
+
+// SetWidthPercent sets the width as a percentage of the available
+// (containing block) width, resolved at layout time — CSS width: 50%.
+// It applies when no explicit width is set; the height follows the
+// aspect ratio unless set explicitly. 0 clears it.
+func (ie *ImageElement) SetWidthPercent(pct float64) *ImageElement {
+	ie.widthPct = pct
 	return ie
 }
 
@@ -117,6 +127,9 @@ func (ie *ImageElement) resolveSize(maxWidth float64) (float64, float64) {
 
 	w := ie.width
 	h := ie.height
+	if w == 0 && ie.widthPct > 0 {
+		w = maxWidth * ie.widthPct / 100
+	}
 	ar := ie.img.AspectRatio()
 
 	// Guard against zero or negative aspect ratio to prevent division by zero.

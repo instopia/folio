@@ -305,6 +305,11 @@ type calcExpr struct {
 	right *calcExpr
 }
 
+// isPlainPercent reports whether l is a bare percentage (no calc/min/max).
+func (l *cssLength) isPlainPercent() bool {
+	return l != nil && l.Unit == "%" && l.calc == nil && len(l.minArgs) == 0 && len(l.maxArgs) == 0
+}
+
 // dependsOnPercent reports whether the resolved value would change with
 // available width — i.e. a percentage appears somewhere in a calc, min,
 // max, or clamp tree. Plain Unit == "%" lengths take the Pct(...) path

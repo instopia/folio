@@ -54,7 +54,13 @@ func (c *converter) convertImage(n *html.Node, style computedStyle) []layout.Ele
 	w := parseAttrFloat(getAttr(n, "width"))
 	h := parseAttrFloat(getAttr(n, "height"))
 	if style.Width != nil {
-		w = style.Width.toPoints(0, style.FontSize)
+		if style.Width.isPlainPercent() {
+			// Resolved against the containing block at layout time.
+			ie.SetWidthPercent(style.Width.Value)
+			w = 0
+		} else {
+			w = style.Width.toPoints(0, style.FontSize)
+		}
 	}
 	if style.Height != nil {
 		h = style.Height.toPoints(0, style.FontSize)
