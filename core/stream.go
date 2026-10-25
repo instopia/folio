@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"sync"
 )
 
 // PdfStream represents a PDF stream object (ISO 32000 §7.3.8).
@@ -128,9 +129,19 @@ func DeflateStreamData(data []byte) ([]byte, error) {
 // primitive behind [DeflateStreamData] and [PdfStream.SetCompressLevel].
 func DeflateStreamDataLevel(data []byte, level int) ([]byte, error) {
 	var buf bytes.Buffer
-	w, err := zlib.NewWriterLevel(&buf, level)
-	if err != nil {
-		return nil, err
+	pool := zlibPool(level)
+	var w *zlib.Writer
+	if pool != nil {
+		if pw, ok := pool.Get().(*zlib.Writer); ok {
+			w = pw
+			w.Reset(&buf)
+		}
+	}
+	if w == nil {
+		var err error
+		if w, err = zlib.NewWriterLevel(&buf, level); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := w.Write(data); err != nil {
 		return nil, err
@@ -138,7 +149,21 @@ func DeflateStreamDataLevel(data []byte, level int) ([]byte, error) {
 	if err := w.Close(); err != nil {
 		return nil, err
 	}
+	if pool != nil {
+		pool.Put(w) // only after a clean Close; Reset reinitialises it
+	}
 	return buf.Bytes(), nil
+}
+
+// zlibWriters pools zlib writers per compression level (each one holds
+// several hundred KiB of deflate state, allocated per stream otherwise).
+var zlibWriters [zlib.BestCompression - zlib.HuffmanOnly + 1]sync.Pool
+
+func zlibPool(level int) *sync.Pool {
+	if level < zlib.HuffmanOnly || level > zlib.BestCompression {
+		return nil
+	}
+	return &zlibWriters[level-zlib.HuffmanOnly]
 }
 
 // InflateStreamData is the inverse of [DeflateStreamData]: it
