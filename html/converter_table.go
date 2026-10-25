@@ -68,8 +68,7 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 			}
 			text := collectText(child)
 			if text != "" {
-				f := resolveFont(captionStyle)
-				p := layout.NewParagraph(text, f, captionStyle.FontSize)
+				p := c.newTextParagraph(text, captionStyle)
 				// The UA default for <caption> is center. A declaration
 				// on the caption itself outranks it, but an alignment
 				// merely inherited from an ancestor does not — so test

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/carlos7ags/folio/font"
 	"github.com/carlos7ags/folio/layout"
@@ -94,6 +95,119 @@ func decodeFontDataURI(uri string) (font.Face, error) {
 	return font.ParseTTF(data)
 }
 
+// defaultFontFamily is the reserved embeddedFonts family under which
+// Options.DefaultFont's faces are registered. The NUL byte keeps it from
+// colliding with any CSS family name.
+const defaultFontFamily = "\x00default"
+
+// loadDefaultFont registers Options.DefaultFont's variants in
+// embeddedFonts under defaultFontFamily, keyed like @font-face faces so
+// resolveFontPair's nearest-weight matching applies to them unchanged.
+func (c *converter) loadDefaultFont() {
+	df := c.opts.DefaultFont
+	if df == nil {
+		return
+	}
+	variants := []struct {
+		data   []byte
+		weight int
+		style  string
+		name   string
+	}{
+		{df.Regular, 400, "normal", "Regular"},
+		{df.Bold, 700, "normal", "Bold"},
+		{df.Italic, 400, "italic", "Italic"},
+		{df.BoldItalic, 700, "italic", "BoldItalic"},
+	}
+	for _, v := range variants {
+		if len(v.data) == 0 {
+			continue
+		}
+		face, err := font.ParseFontForLanguage(v.data, c.metadata.Language)
+		if err != nil {
+			c.reportAssetError("DefaultFont", err, "variant", v.name)
+			continue
+		}
+		key := defaultFontFamily + "|" + strconv.Itoa(v.weight) + "|" + v.style
+		c.embeddedFonts[key] = font.NewEmbeddedFont(face)
+		c.hasDefaultFont = true
+	}
+}
+
+// fallbackFaces returns the fallback chain for characters the primary
+// font cannot render: Options.FallbackFonts in order, then the
+// FallbackFontPath / system fallback font (getFallbackFont). Built once
+// per conversion.
+func (c *converter) fallbackFaces() []*font.EmbeddedFont {
+	if c.fallbackChainLoaded {
+		return c.fallbackChain
+	}
+	c.fallbackChainLoaded = true
+	for i, data := range c.opts.FallbackFonts {
+		face, err := font.ParseFontForLanguage(data, c.metadata.Language)
+		if err != nil {
+			c.reportAssetError("FallbackFonts", err, "index", i)
+			continue
+		}
+		c.fallbackChain = append(c.fallbackChain, font.NewEmbeddedFont(face))
+	}
+	if fb := c.getFallbackFont(); fb != nil {
+		c.fallbackChain = append(c.fallbackChain, fb)
+	}
+	return c.fallbackChain
+}
+
+// splitsEmbedded reports whether text set in the embedded font emb is
+// split by glyph coverage onto the fallback chain. That is the case for
+// the caller-supplied default family and whenever the caller supplied
+// FallbackFonts; an @font-face font otherwise renders all of its text
+// itself (missing glyphs show as .notdef), as it always has.
+func (c *converter) splitsEmbedded(emb *font.EmbeddedFont) bool {
+	if len(c.opts.FallbackFonts) > 0 {
+		return true
+	}
+	if !c.hasDefaultFont {
+		return false
+	}
+	for k, ef := range c.embeddedFonts {
+		if ef == emb && strings.HasPrefix(k, defaultFontFamily+"|") {
+			return true
+		}
+	}
+	return false
+}
+
+// pickFallback returns the first face in chain with a glyph for r, or
+// chain[0] when none has one (it renders as .notdef, as before).
+func pickFallback(chain []*font.EmbeddedFont, r rune) *font.EmbeddedFont {
+	for _, ef := range chain {
+		if ef.Face().GlyphIndex(r) != 0 {
+			return ef
+		}
+	}
+	return chain[0]
+}
+
+// clusterContinuation reports whether r continues the preceding
+// character's grapheme cluster (combining marks, joiners, variation
+// selectors, emoji modifiers and tags) and must therefore stay in the
+// same font as it, even when that font has no glyph of its own for r.
+func clusterContinuation(r rune) bool {
+	switch {
+	case r == 0x200C || r == 0x200D: // ZWNJ, ZWJ
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F: // variation selectors
+		return true
+	case r >= 0x1F3FB && r <= 0x1F3FF: // emoji skin-tone modifiers
+		return true
+	case r >= 0xE0020 && r <= 0xE007F: // tag characters (flag sequences)
+		return true
+	case r >= 0xE0100 && r <= 0xE01EF: // variation selectors supplement
+		return true
+	}
+	return unicode.In(r, unicode.Mn, unicode.Me)
+}
+
 // getFallbackFont returns a Unicode-capable embedded font for text that
 // can't be encoded in WinAnsiEncoding. The font is loaded lazily on first
 // use. Returns nil if no suitable font is found.
@@ -122,6 +236,10 @@ func (c *converter) getFallbackFont() *font.EmbeddedFont {
 			c.reportAssetError("FallbackFontPath", err,
 				"path", c.opts.FallbackFontPath)
 		}
+	}
+
+	if c.opts.DisableSystemFonts {
+		return nil
 	}
 
 	// Search common system font locations for a Unicode-capable font.
@@ -205,8 +323,20 @@ func (c *converter) loadFallbackFont(p, lang string) (font.Face, error) {
 func (c *converter) resolveFontForText(style computedStyle, text string) (*font.Standard, *font.EmbeddedFont) {
 	stdFont, embFont := c.resolveFontPair(style)
 
-	// If already using an embedded font (from @font-face), it handles Unicode.
 	if embFont != nil {
+		// An embedded font handles Unicode itself unless it is split by
+		// coverage (see splitsEmbedded); then the whole text goes to the
+		// fallback face for its first uncovered character.
+		if c.splitsEmbedded(embFont) {
+			for _, r := range text {
+				if embFont.Face().GlyphIndex(r) == 0 && !isSpaceRune(r) && !clusterContinuation(r) {
+					if chain := c.fallbackFaces(); len(chain) > 0 {
+						return nil, pickFallback(chain, r)
+					}
+					break
+				}
+			}
+		}
 		return nil, embFont
 	}
 
@@ -216,12 +346,22 @@ func (c *converter) resolveFontForText(style computedStyle, text string) (*font.
 	}
 
 	// Text has characters the standard font cannot encode — try fallback.
-	if fb := c.getFallbackFont(); fb != nil {
-		return nil, fb
+	if chain := c.fallbackFaces(); len(chain) > 0 {
+		for _, r := range text {
+			if !stdFont.CanEncodeRune(r) {
+				return nil, pickFallback(chain, r)
+			}
+		}
 	}
 
 	// No fallback available — use standard font (chars will become ?).
 	return stdFont, nil
+}
+
+// isSpaceRune reports whether r is a whitespace character (which every
+// font is assumed to render, so it never forces a fallback).
+func isSpaceRune(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == 0xA0
 }
 
 // applyUnicodeBidi wraps text in Unicode bidi control characters based on
@@ -293,50 +433,79 @@ func (c *converter) splitTextByFont(text string, style computedStyle) []layout.T
 
 	stdFont, embFont := c.resolveFontPair(style)
 
-	// If already using an embedded font, it handles all Unicode — no split.
+	// covers reports whether the primary font renders r.
+	var covers func(rune) bool
 	if embFont != nil {
-		return []layout.TextRun{c.makeTextRun(text, nil, embFont, style)}
+		// An embedded font handles all Unicode itself — no split —
+		// unless it is split by coverage (see splitsEmbedded).
+		if !c.splitsEmbedded(embFont) {
+			return []layout.TextRun{c.makeTextRun(text, nil, embFont, style)}
+		}
+		face := embFont.Face()
+		covers = func(r rune) bool { return face.GlyphIndex(r) != 0 || isSpaceRune(r) }
+	} else {
+		// If all text fits in the standard font's encoding — no split.
+		if stdFont.CanEncode(text) {
+			return []layout.TextRun{c.makeTextRun(text, stdFont, nil, style)}
+		}
+		covers = stdFont.CanEncodeRune
 	}
 
-	// If all text fits in the standard font's encoding — no split.
-	if stdFont.CanEncode(text) {
-		return []layout.TextRun{c.makeTextRun(text, stdFont, nil, style)}
+	// Get the fallback chain. If empty, return a single primary run.
+	chain := c.fallbackFaces()
+	if len(chain) == 0 {
+		return []layout.TextRun{c.makeTextRun(text, stdFont, embFont, style)}
 	}
 
-	// Get the fallback font. If unavailable, return single run with std font.
-	fb := c.getFallbackFont()
-	if fb == nil {
-		return []layout.TextRun{c.makeTextRun(text, stdFont, nil, style)}
-	}
-
-	// Split at boundaries between characters the standard font can and
-	// cannot encode.
-	// Consecutive characters that share the same "needs fallback" status are
-	// grouped into a single run to minimize run count.
-	runes := []rune(text)
+	// Split at boundaries where the font changes: the primary font for
+	// characters it covers, otherwise the first fallback face that has a
+	// glyph. Characters continuing a cluster (combining marks, ZWJ,
+	// variation selectors) stay with the preceding character's font.
+	// Consecutive characters set in the same font form a single run.
 	var runs []layout.TextRun
-	start := 0
-	startNeedsFallback := !stdFont.CanEncodeRune(runes[0])
-
-	for i := 1; i <= len(runes); i++ {
-		needsFallback := false
-		if i < len(runes) {
-			needsFallback = !stdFont.CanEncodeRune(runes[i])
+	var cur *font.EmbeddedFont // nil = primary
+	var seg []rune
+	flush := func() {
+		if len(seg) == 0 {
+			return
 		}
-		// Emit a run at boundaries or at end of string.
-		if i == len(runes) || needsFallback != startNeedsFallback {
-			seg := string(runes[start:i])
-			if startNeedsFallback {
-				runs = append(runs, c.makeTextRun(seg, nil, fb, style))
-			} else {
-				runs = append(runs, c.makeTextRun(seg, stdFont, nil, style))
-			}
-			start = i
-			startNeedsFallback = needsFallback
+		if cur == nil {
+			runs = append(runs, c.makeTextRun(string(seg), stdFont, embFont, style))
+		} else {
+			runs = append(runs, c.makeTextRun(string(seg), nil, cur, style))
 		}
+		seg = seg[:0]
 	}
-
+	for i, r := range []rune(text) {
+		var f *font.EmbeddedFont
+		switch {
+		case i > 0 && clusterContinuation(r):
+			f = cur
+		case covers(r):
+			f = nil
+		default:
+			f = pickFallback(chain, r)
+		}
+		if i > 0 && f != cur {
+			flush()
+		}
+		cur = f
+		seg = append(seg, r)
+	}
+	flush()
 	return runs
+}
+
+// newTextParagraph returns a paragraph of plain text in the font the
+// style resolves to (an @font-face or default-family face when one
+// matches, otherwise a standard font), so captions and the like match the
+// surrounding text instead of always using a standard font.
+func (c *converter) newTextParagraph(text string, style computedStyle) *layout.Paragraph {
+	std, emb := c.resolveFontForText(style, text)
+	if emb != nil {
+		return layout.NewParagraphEmbedded(text, emb, style.FontSize)
+	}
+	return layout.NewParagraph(text, std, style.FontSize)
 }
 
 // makeTextRun creates a TextRun with all styling fields from the computed style.

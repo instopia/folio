@@ -42,6 +42,32 @@ type Options struct {
 	// BaseFS is set, the path is resolved through it first; otherwise the
 	// converter searches common system font locations.
 	FallbackFontPath string
+	// DefaultFont is an in-memory font family (TTF/OTF bytes) embedded in
+	// place of the standard PDF fonts. When set, text whose font-family
+	// no @font-face rule declares — sans-serif and serif families alike —
+	// is set in this family instead of the non-embedded Helvetica/Times,
+	// so the output looks the same in every viewer (a viewer without the
+	// standard fonts installed substitutes them, often badly: wrong
+	// weights, no italics). Monospace families keep standard Courier.
+	// Missing variants fall back to the nearest one present (CSS Fonts L4
+	// §5.2 weight matching, then the opposite style). The bytes are
+	// trusted, are parsed once per conversion and do not count towards
+	// MaxTotalAssetBytes.
+	DefaultFont *FontFamily
+	// FallbackFonts are in-memory fonts (TTF/OTF/TTC bytes), tried in
+	// order, for characters the primary font has no glyph for — CJK,
+	// other scripts, emoji. Each character is set in the first font that
+	// covers it. They are consulted before FallbackFontPath and the
+	// system font search. Like DefaultFont the bytes are trusted and do
+	// not count towards MaxTotalAssetBytes.
+	FallbackFonts [][]byte
+	// DisableSystemFonts turns off the built-in search of fixed system
+	// font locations (/System/Library/Fonts, /usr/share/fonts, C:\Windows\Fonts,
+	// ...) for a Unicode fallback font, so a conversion reads no file the
+	// caller did not name. FallbackFontPath and FallbackFonts still apply.
+	// Use it with DefaultFont and FallbackFonts for output that does not
+	// depend on the host's installed fonts.
+	DisableSystemFonts bool
 	// URLPolicy is called before the converter fetches a remote URL
 	// (for <img src="http://...">, background-image: url(), etc.), and
 	// again for each redirect hop. Return nil to allow the fetch, or an
@@ -128,6 +154,16 @@ type Options struct {
 	MaxTotalAssetBytes int64
 }
 
+// FontFamily is one font family supplied in memory as TTF/OTF (or TTC)
+// bytes, one per variant. Any variant may be nil; the converter then uses
+// the nearest variant that is present. See Options.DefaultFont.
+type FontFamily struct {
+	Regular    []byte // weight 400, normal
+	Bold       []byte // weight 700, normal
+	Italic     []byte // weight 400, italic
+	BoldItalic []byte // weight 700, italic
+}
+
 // URLPolicy controls whether the HTML converter may fetch a remote URL.
 // It is called with the URL string before each HTTP request. Return nil
 // to allow the fetch, or an error to block it and prevent the request.
@@ -150,6 +186,9 @@ func (o *Options) defaults() Options {
 	}
 	out.BaseFS = o.BaseFS
 	out.FallbackFontPath = o.FallbackFontPath
+	out.DefaultFont = o.DefaultFont
+	out.FallbackFonts = o.FallbackFonts
+	out.DisableSystemFonts = o.DisableSystemFonts
 	out.URLPolicy = o.URLPolicy
 	out.AllowRemoteFetch = o.AllowRemoteFetch
 	out.AllowAbsolutePaths = o.AllowAbsolutePaths
@@ -547,8 +586,9 @@ func ConvertFullWithContext(ctx context.Context, htmlStr string, opts *Options) 
 	// ConvertResult below.
 	c.metadata.Language = findHTMLLang(doc)
 
-	// Load @font-face fonts.
+	// Load @font-face fonts and the caller's default family.
 	c.loadFontFaces(ss.fontFaces)
+	c.loadDefaultFont()
 
 	elems := c.walkChildren(doc, style)
 	if c.ctxErr != nil {
@@ -639,8 +679,9 @@ func ConvertWithContext(ctx context.Context, htmlStr string, opts *Options) ([]l
 	// so the document-level language drives TTC face selection.
 	c.metadata.Language = findHTMLLang(doc)
 
-	// Load @font-face fonts.
+	// Load @font-face fonts and the caller's default family.
 	c.loadFontFaces(ss.fontFaces)
+	c.loadDefaultFont()
 
 	elems := c.walkChildren(doc, style)
 	if c.ctxErr != nil {
@@ -668,6 +709,14 @@ type converter struct {
 	// Unicode fallback: lazily loaded when text contains non-WinAnsi characters.
 	fallbackFont       *font.EmbeddedFont
 	fallbackFontLoaded bool // true after first attempt (even if failed)
+
+	// hasDefaultFont reports that Options.DefaultFont registered at least
+	// one face under defaultFontFamily in embeddedFonts.
+	hasDefaultFont bool
+	// fallbackChain is Options.FallbackFonts (parsed) followed by the
+	// path/system fallback font; built lazily by fallbackFaces.
+	fallbackChain       []*font.EmbeddedFont
+	fallbackChainLoaded bool
 
 	// CSS counters: maps counter name → stack of values (for nesting).
 	counters map[string][]int

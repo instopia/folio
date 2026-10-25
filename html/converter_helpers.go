@@ -86,22 +86,35 @@ func (c *converter) resolveFontPair(style computedStyle) (*font.Standard, *font.
 		if desired == 0 {
 			desired = 400
 		}
-		if ef := c.matchEmbeddedFont(family, fontStyle, desired); ef != nil {
+		if ef := c.matchEmbeddedFamily(family, fontStyle, desired); ef != nil {
 			return nil, ef
 		}
-		// Style mismatch fallback: try the same family at the requested
-		// weight but with the opposite style. Better to render in
-		// regular Inter than fall through to Helvetica when the author
-		// asked for italic Inter.
-		altStyle := "normal"
-		if fontStyle == "normal" {
-			altStyle = "italic"
-		}
-		if ef := c.matchEmbeddedFont(family, altStyle, desired); ef != nil {
-			return nil, ef
+		// No @font-face for the family: the caller's default family
+		// (Options.DefaultFont) replaces the standard sans and serif
+		// fonts. Monospace keeps Courier.
+		if c.hasDefaultFont && mapToStandardFamily(family) != "courier" {
+			if ef := c.matchEmbeddedFamily(defaultFontFamily, fontStyle, desired); ef != nil {
+				return nil, ef
+			}
 		}
 	}
 	return resolveFont(style), nil
+}
+
+// matchEmbeddedFamily is matchEmbeddedFont with a style-mismatch
+// fallback: when the family has no face in the requested style, try the
+// opposite style at the requested weight. Better to render in regular
+// Inter than fall through to Helvetica when the author asked for italic
+// Inter.
+func (c *converter) matchEmbeddedFamily(family, fontStyle string, desired int) *font.EmbeddedFont {
+	if ef := c.matchEmbeddedFont(family, fontStyle, desired); ef != nil {
+		return ef
+	}
+	altStyle := "normal"
+	if fontStyle == "normal" {
+		altStyle = "italic"
+	}
+	return c.matchEmbeddedFont(family, altStyle, desired)
 }
 
 // resolveMarginBoxFont resolves the font for one margin box's own

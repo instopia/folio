@@ -826,8 +826,7 @@ func (c *converter) convertDefinitionList(n *html.Node, style computedStyle) []l
 				continue
 			}
 			text = applyTextTransform(text, childStyle.TextTransform)
-			f := resolveFont(childStyle)
-			p := layout.NewParagraph(text, f, childStyle.FontSize)
+			p := c.newTextParagraph(text, childStyle)
 			p.SetAlign(resolveTextAlign(childStyle))
 			p.SetLeading(childStyle.LineHeight)
 			div.Add(p)
@@ -899,8 +898,7 @@ func (c *converter) convertFigure(n *html.Node, style computedStyle) []layout.El
 				continue
 			}
 			text = applyTextTransform(text, childStyle.TextTransform)
-			f := resolveFont(childStyle)
-			p := layout.NewParagraph(text, f, childStyle.FontSize)
+			p := c.newTextParagraph(text, childStyle)
 			p.SetAlign(layout.AlignCenter)
 			p.SetLeading(childStyle.LineHeight)
 			p.SetSpaceBefore(4)
