@@ -29,16 +29,14 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 		borderWidth = 0.5
 	}
 
-	// Check for CSS border on the table style.
-	if style.hasBorder() {
-		borderWidth = style.BorderTopWidth
-		if borderWidth == 0 {
-			borderWidth = 0.5
-		}
-	}
-
 	// border-collapse: collapse removes duplicate borders between cells.
 	collapse := style.BorderCollapse == "collapse"
+
+	// A CSS border on the table paints the table box only, as in
+	// browsers (border is not inherited by cells); only the HTML border
+	// attribute above also gives every cell a border. In the collapsing
+	// model a table that already has bordered cells keeps just those.
+	tableBorder := style.hasBorder() && !(collapse && borderWidth > 0)
 	if collapse {
 		tbl.SetBorderCollapse(true)
 	}
@@ -132,7 +130,7 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 	// definite width. A shrink-to-fit table stays left-aligned: the
 	// wrapper cannot measure its natural width.
 	centered := style.MarginLeftAuto && style.MarginRightAuto && style.Width != nil
-	if hasTableMargin || style.BackgroundColor != nil || hasTableWidth || style.hasBorderRadius() || centered {
+	if hasTableMargin || style.BackgroundColor != nil || hasTableWidth || style.hasBorderRadius() || centered || tableBorder {
 		div := layout.NewDiv()
 		div.Add(tbl)
 		if mt > 0 {
@@ -143,6 +141,9 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 		}
 		if style.BackgroundColor != nil {
 			div.SetBackground(*style.BackgroundColor)
+		}
+		if tableBorder {
+			div.SetBorders(buildCellBorders(style))
 		}
 		if style.MaxWidth != nil {
 			div.SetMaxWidth(style.MaxWidth.toPoints(parentContainerWidth, style.FontSize))

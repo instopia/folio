@@ -219,6 +219,9 @@ func (c *Cell) Background() *Color {
 // means the corner is sharp. Provided for testing.
 func (c *Cell) BorderRadii() [4]float64 { return c.borderRadius }
 
+// Borders returns the cell's per-side borders.
+func (c *Cell) Borders() CellBorders { return c.borders }
+
 // SetColspan sets the number of columns this cell spans.
 func (c *Cell) SetColspan(n int) *Cell {
 	if n < 1 {
