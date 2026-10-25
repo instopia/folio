@@ -406,6 +406,16 @@ func (p *Paragraph) measureWords(maxWidth float64) ([]Word, float64) {
 						prev.Width += prev.LetterSpacing * float64(utf8.RuneCountInString(prevMeasureText)-1)
 					}
 					text = rest
+					// glueAdjacentRuns zeroed prev's SpaceAfter because
+					// the punctuation abutted it; the space now belongs
+					// after the punctuation. Restore it when whitespace
+					// follows (or when the run was only punctuation —
+					// the next run's own glue step zeroes it again if
+					// that run abuts), so "<a>policy</a>? It's" keeps
+					// its space.
+					if rest == "" || isSpace(rune(rest[0])) {
+						prev.SpaceAfter = spaceW
+					}
 				}
 			}
 		}
