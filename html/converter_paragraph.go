@@ -258,7 +258,6 @@ func (c *converter) convertPre(n *html.Node, style computedStyle) []layout.Eleme
 		return nil
 	}
 
-	f := resolveFont(style)
 	lines := strings.Split(raw, "\n")
 
 	// Strip leading/trailing empty lines.
@@ -275,12 +274,17 @@ func (c *converter) convertPre(n *html.Node, style computedStyle) []layout.Eleme
 	div.SetBackground(bg)
 
 	for _, line := range lines {
-		if line == "" {
-			line = " " // preserve blank lines
+		if strings.TrimSpace(line) == "" {
+			// Preserve blank lines. A whitespace-only paragraph has no
+			// words and so no height; use a spacer one line tall.
+			div.Add(layout.NewDiv().SetHeightUnit(layout.Pt(style.FontSize * 1.4)))
+			continue
 		}
 		// Replace tabs with spaces.
 		line = strings.ReplaceAll(line, "\t", "    ")
-		p := layout.NewParagraph(line, f, style.FontSize)
+		// Set in the resolved font (an @font-face or default-family
+		// face when one matches), like the surrounding text.
+		p := c.newTextParagraph(line, style)
 		p.SetLeading(1.4)
 		div.Add(p)
 	}
