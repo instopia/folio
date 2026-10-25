@@ -181,10 +181,15 @@ func (c *converter) convertFlex(n *html.Node, style computedStyle) []layout.Elem
 			elem = wrapper
 		}
 
-		// CSS width on a flex child acts as flex-basis (when flex-basis is not set).
+		// CSS width on a flex child acts as flex-basis (when flex-basis is
+		// not set) in a ROW container, where width is the main size. In a
+		// column container width is the cross size: it stays the child's
+		// own width (resolved against the container, see the layout's
+		// percentWidthElement).
 		effectiveBasis := childStyle.FlexBasis
 		widthUsedAsBasis := false
-		if effectiveBasis == nil && childStyle.Width != nil {
+		isColumn := style.FlexDirection == "column" || style.FlexDirection == "column-reverse"
+		if effectiveBasis == nil && childStyle.Width != nil && !isColumn {
 			effectiveBasis = childStyle.Width
 			widthUsedAsBasis = true
 		}

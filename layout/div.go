@@ -585,6 +585,42 @@ func (d *Div) MaxWidth() float64 {
 	return maxW + d.padding.Left + d.padding.Right
 }
 
+// clampWidth applies max-width then min-width (resolved against the
+// available width) to an outer width.
+func (d *Div) clampWidth(w, areaWidth float64) float64 {
+	maxW := d.maxWidth
+	if d.maxWidthUnit != nil {
+		maxW = d.maxWidthUnit.Resolve(areaWidth)
+	}
+	if maxW > 0 && w > maxW {
+		w = maxW
+	}
+	minW := d.minWidth
+	if d.minWidthUnit != nil {
+		minW = d.minWidthUnit.Resolve(areaWidth)
+	}
+	if minW > 0 && w < minW {
+		w = minW
+	}
+	return w
+}
+
+// PercentWidthIn implements percentWidthElement: the Div's outer width in
+// a container of the given width, when its width is a percentage (or a
+// calc() that depends on the container).
+func (d *Div) PercentWidthIn(containerWidth float64) (float64, bool) {
+	var w float64
+	switch {
+	case d.widthUnit != nil && d.widthUnit.Unit != UnitPoint:
+		w = d.widthUnit.Resolve(containerWidth)
+	case d.widthUnit == nil && d.widthPct > 0:
+		w = containerWidth * d.widthPct
+	default:
+		return 0, false
+	}
+	return d.clampWidth(w, containerWidth), true
+}
+
 // PlanLayout implements Element. A Div splits its children across pages.
 func (d *Div) PlanLayout(area LayoutArea) LayoutPlan {
 	effectiveWidth := area.Width
@@ -617,23 +653,7 @@ func (d *Div) PlanLayout(area LayoutArea) LayoutPlan {
 		effectiveWidth = fitContent
 	}
 
-	// Resolve max-width.
-	maxW := d.maxWidth
-	if d.maxWidthUnit != nil {
-		maxW = d.maxWidthUnit.Resolve(area.Width)
-	}
-	if maxW > 0 && effectiveWidth > maxW {
-		effectiveWidth = maxW
-	}
-
-	// Resolve min-width.
-	minW := d.minWidth
-	if d.minWidthUnit != nil {
-		minW = d.minWidthUnit.Resolve(area.Width)
-	}
-	if minW > 0 && effectiveWidth < minW {
-		effectiveWidth = minW
-	}
+	effectiveWidth = d.clampWidth(effectiveWidth, area.Width)
 	innerWidth := effectiveWidth - d.padding.Left - d.padding.Right
 	if innerWidth < 0 {
 		innerWidth = 0

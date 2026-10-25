@@ -84,3 +84,30 @@ func TestPercentImageCentredInColumnFlex(t *testing.T) {
 		t.Fatal("image block not found")
 	}
 }
+
+// The same for a block with a percentage width: width:100% in a centred
+// column flex fills the container (it was shrunk to its content).
+func TestPercentDivFillsCentredColumnFlex(t *testing.T) {
+	elems, err := Convert(`<div style="display:flex; flex-direction:column; align-items:center">`+
+		`<div style="width:100%; max-width:100%; min-height:40px; background:#eee">x</div>`+
+		`<div style="width:50%; background:#ccc">y</div></div>`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := elems[0].PlanLayout(layout.LayoutArea{Width: 400, Height: 1000})
+	var got [][2]float64
+	for _, b := range plan.Blocks {
+		for _, c := range b.Children {
+			got = append(got, [2]float64{c.X, c.Width})
+		}
+	}
+	want := [][2]float64{{0, 400}, {100, 200}}
+	if len(got) != len(want) {
+		t.Fatalf("items %v, want %v", got, want)
+	}
+	for i := range want {
+		if math.Abs(got[i][0]-want[i][0]) > 0.5 || math.Abs(got[i][1]-want[i][1]) > 0.5 {
+			t.Errorf("item %d at x=%.1f width %.1f, want x=%.0f width %.0f", i, got[i][0], got[i][1], want[i][0], want[i][1])
+		}
+	}
+}
