@@ -129,7 +129,7 @@ func (c *converter) isInlineFlowChild(child *html.Node, parentStyle computedStyl
 	case html.ElementNode:
 		switch child.DataAtom {
 		case atom.Span, atom.Em, atom.Strong, atom.B, atom.I, atom.U, atom.S,
-			atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code,
+			atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code, atom.Font,
 			atom.A:
 			// Honor CSS display overrides — a <span style="display:block">
 			// should still be treated as a block.
@@ -604,7 +604,7 @@ func (c *converter) convertElementInner(n *html.Node, style computedStyle) []lay
 	case atom.Figure:
 		return c.convertFigure(n, style)
 	case atom.Span, atom.Em, atom.Strong, atom.B, atom.I, atom.U, atom.S,
-		atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code:
+		atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code, atom.Font:
 		// A default-inline element set to display:block that carries a
 		// block-level box (a border-radius with a background or border) must
 		// own a rounded fill, like display:inline-block already does. The

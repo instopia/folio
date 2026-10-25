@@ -128,7 +128,11 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 	mb := style.MarginBottomAt(parentContainerWidth)
 	hasTableMargin := mt > 0 || mb > 0
 	hasTableWidth := style.MaxWidth != nil
-	if hasTableMargin || style.BackgroundColor != nil || hasTableWidth || style.hasBorderRadius() {
+	// margin-left/right:auto (or align=center) centers a table with a
+	// definite width. A shrink-to-fit table stays left-aligned: the
+	// wrapper cannot measure its natural width.
+	centered := style.MarginLeftAuto && style.MarginRightAuto && style.Width != nil
+	if hasTableMargin || style.BackgroundColor != nil || hasTableWidth || style.hasBorderRadius() || centered {
 		div := layout.NewDiv()
 		div.Add(tbl)
 		if mt > 0 {
@@ -142,6 +146,10 @@ func (c *converter) convertTable(n *html.Node, style computedStyle) []layout.Ele
 		}
 		if style.MaxWidth != nil {
 			div.SetMaxWidth(style.MaxWidth.toPoints(parentContainerWidth, style.FontSize))
+		}
+		if centered {
+			div.SetWidthUnit(cssLengthToUnitValue(style.Width, parentContainerWidth, style.FontSize))
+			div.SetHCenter(true)
 		}
 		// Apply the table's CSS border-radius to the wrapper Div so a rounded
 		// table background is honored (issue #329). The child is a Table, not a

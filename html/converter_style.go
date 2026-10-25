@@ -65,6 +65,13 @@ func (c *converter) computeElementStyle(n *html.Node, parent computedStyle) comp
 		inline    bool
 	}
 	var decls []pendingDecl
+	// Presentational hints (bgcolor, width, align, <font color>, ...)
+	// come first: they are author-level with zero specificity, so every
+	// stylesheet or inline declaration for the same property overrides
+	// them (HTML §15.1). The stable tier sort below keeps them first.
+	for _, h := range presentationalHints(n) {
+		decls = append(decls, pendingDecl{property: h[0], value: h[1]})
+	}
 	if c.sheet != nil {
 		for _, decl := range c.sheet.matchingDeclarations(n) {
 			decls = append(decls, pendingDecl{
@@ -226,6 +233,10 @@ func (c *converter) applyTagDefaults(n *html.Node, style *computedStyle) {
 		style.Display = "inline"
 	case atom.Code:
 		style.FontFamily = "courier"
+		style.Display = "inline"
+	case atom.Font:
+		// Legacy <font> is an inline element; its color/face/size
+		// attributes are presentational hints (presentationalHints).
 		style.Display = "inline"
 	case atom.Pre:
 		style.FontFamily = "courier"

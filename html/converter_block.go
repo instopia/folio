@@ -297,7 +297,7 @@ func applyBorderRadiusToDiv(div *layout.Div, style computedStyle) {
 func isDefaultInlineAtom(a atom.Atom) bool {
 	switch a {
 	case atom.Span, atom.Em, atom.Strong, atom.B, atom.I, atom.U, atom.S,
-		atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code:
+		atom.Del, atom.Mark, atom.Small, atom.Sub, atom.Sup, atom.Code, atom.Font:
 		return true
 	}
 	return false
