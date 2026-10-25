@@ -52,6 +52,16 @@ func (ie *ImageElement) SetWidthPercent(pct float64) *ImageElement {
 	return ie
 }
 
+// PercentWidthIn implements percentWidthElement: the rendered width in a
+// container of the given width, when the width is a percentage.
+func (ie *ImageElement) PercentWidthIn(containerWidth float64) (float64, bool) {
+	if ie.widthPct <= 0 || ie.width > 0 {
+		return 0, false
+	}
+	w, _ := ie.resolveSize(containerWidth)
+	return w, true
+}
+
 // SetMaxSize sets CSS-style max-width and max-height upper bounds in
 // PDF points. A value of 0 means "unbounded" on that axis. Bounds
 // apply after the explicit / natural / aspect-ratio size is resolved

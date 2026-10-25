@@ -55,3 +55,32 @@ func TestImagePercentWidthResolvesAgainstContainer(t *testing.T) {
 		}
 	}
 }
+
+// In a column flex container with align-items:center (a <figure> laid out
+// as a centred column), a 50% image is half the container wide and
+// centred — the percentage is of the container, applied once.
+func TestPercentImageCentredInColumnFlex(t *testing.T) {
+	uri := pngDataURI(t, 200, 100)
+	elems, err := Convert(`<div style="display:flex; flex-direction:column; align-items:center"><img src="`+uri+`" style="width:50%"/></div>`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := elems[0].PlanLayout(layout.LayoutArea{Width: 400, Height: 1000})
+	var found bool
+	var walk func(bs []layout.PlacedBlock, x float64)
+	walk = func(bs []layout.PlacedBlock, x float64) {
+		for _, b := range bs {
+			if b.Tag == "Figure" || (b.Width > 0 && len(b.Children) == 0 && b.Height > 50) {
+				found = true
+				if got := x + b.X; math.Abs(got-100) > 0.5 || math.Abs(b.Width-200) > 0.5 {
+					t.Errorf("image at x=%.1f width %.1f, want x=100 width 200", got, b.Width)
+				}
+			}
+			walk(b.Children, x+b.X)
+		}
+	}
+	walk(plan.Blocks, 0)
+	if !found {
+		t.Fatal("image block not found")
+	}
+}

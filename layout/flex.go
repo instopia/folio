@@ -976,9 +976,10 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 	// --- Phase 1: Layout all items at natural height (overflow detection). ---
 
 	type colItemResult struct {
-		plan      LayoutPlan
-		itemWidth float64
-		align     AlignItems
+		plan        LayoutPlan
+		itemWidth   float64 // placement width (cross-axis alignment)
+		layoutWidth float64 // area width the item was laid out in
+		align       AlignItems
 	}
 	var results []colItemResult
 	curY := f.padding.Top
@@ -1027,17 +1028,33 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 
 		// Resolve item width for cross-axis alignment.
 		itemWidth := innerWidth
+		layoutWidth := -1.0 // area width for PlanLayout when it differs from itemWidth
 		align := f.alignItems
 		if item.alignSelf != nil {
 			align = *item.alignSelf
 		}
 		if align != CrossAlignStretch {
-			if m, ok := item.element.(Measurable); ok {
-				itemWidth = m.MaxWidth()
-				if itemWidth > innerWidth {
-					itemWidth = innerWidth
+			if pw, ok := item.element.(percentWidthElement); ok {
+				if w, ok := pw.PercentWidthIn(innerWidth); ok {
+					// A percentage width resolves against the flex
+					// container, so the item is laid out in the full
+					// inner width and only its placement uses its own
+					// width; laying it out in its own width would
+					// apply the percentage twice.
+					layoutWidth, itemWidth = innerWidth, min(w, innerWidth)
 				}
 			}
+			if layoutWidth < 0 {
+				if m, ok := item.element.(Measurable); ok {
+					itemWidth = m.MaxWidth()
+					if itemWidth > innerWidth {
+						itemWidth = innerWidth
+					}
+				}
+			}
+		}
+		if layoutWidth < 0 {
+			layoutWidth = itemWidth
 		}
 
 		// Negative horizontal margins widen the item beyond the parent
@@ -1046,7 +1063,7 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 			itemWidth -= item.marginLeft + item.marginRight // subtracting negatives = adding
 		}
 
-		plan := item.element.PlanLayout(LayoutArea{Width: itemWidth, Height: remaining})
+		plan := item.element.PlanLayout(LayoutArea{Width: layoutWidth, Height: remaining})
 
 		switch plan.Status {
 		case LayoutFull:
@@ -1061,7 +1078,7 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 				b.Y += curY
 				earlyBlocks = append(earlyBlocks, b)
 			}
-			results = append(results, colItemResult{plan, itemWidth, align})
+			results = append(results, colItemResult{plan, itemWidth, layoutWidth, align})
 			consumed := plan.Consumed + item.marginBottom
 			curY += consumed
 			remaining -= consumed
@@ -1115,7 +1132,7 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 				if ok && !hs.HasExplicitHeight() {
 					hs.ForceHeight(Pt(newH))
 					results[idx].plan = item.element.PlanLayout(LayoutArea{
-						Width:  results[idx].itemWidth,
+						Width:  results[idx].layoutWidth,
 						Height: newH,
 					})
 					hs.ClearHeightUnit()
@@ -1207,6 +1224,14 @@ func (f *Flex) planColumn(area LayoutArea) LayoutPlan {
 		return LayoutPlan{Status: LayoutFull, Consumed: consumed, Blocks: []PlacedBlock{containerBlock}}
 	}
 	return LayoutPlan{Status: LayoutFull, Consumed: consumed, Blocks: []PlacedBlock{containerBlock}}
+}
+
+// percentWidthElement is an element whose width is a percentage of its
+// containing block (an <img style="width:50%">). PercentWidthIn reports
+// the resolved width in a container of the given width, and false when
+// the element's width is not a percentage.
+type percentWidthElement interface {
+	PercentWidthIn(containerWidth float64) (float64, bool)
 }
 
 // columnAlignOffset computes the horizontal offset for cross-axis alignment in column layout.
