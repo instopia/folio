@@ -140,6 +140,12 @@ func (g *Grid) SetSpaceBefore(pts float64) *Grid { g.spaceBefore = pts; return g
 // SetSpaceAfter sets extra vertical space after the container.
 func (g *Grid) SetSpaceAfter(pts float64) *Grid { g.spaceAfter = pts; return g }
 
+// GetSpaceBefore returns the extra vertical space before the Grid container.
+func (g *Grid) GetSpaceBefore() float64 { return g.spaceBefore }
+
+// GetSpaceAfter returns the extra vertical space after the Grid container.
+func (g *Grid) GetSpaceAfter() float64 { return g.spaceAfter }
+
 // ForceHeight implements HeightSettable.
 func (g *Grid) ForceHeight(u UnitValue) { g.heightUnit = &u }
 

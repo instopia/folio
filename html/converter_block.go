@@ -586,10 +586,8 @@ func (c *converter) buildMulticolSegments(n *html.Node, style computedStyle) []l
 			continue
 		}
 
-		for _, e := range childElems {
-			prevMarginBottom = collapseMargins(prevMarginBottom, e)
-			segment = append(segment, e)
-		}
+		prevMarginBottom = collapseChildMargins(prevMarginBottom, childElems)
+		segment = append(segment, childElems...)
 	}
 	flushSegment()
 	return result

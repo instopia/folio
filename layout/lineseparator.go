@@ -56,6 +56,12 @@ func (ls *LineSeparator) SetSpaceAfter(pts float64) *LineSeparator {
 	return ls
 }
 
+// GetSpaceBefore returns the vertical space above the separator.
+func (ls *LineSeparator) GetSpaceBefore() float64 { return ls.spaceBefore }
+
+// GetSpaceAfter returns the vertical space below the separator.
+func (ls *LineSeparator) GetSpaceAfter() float64 { return ls.spaceAfter }
+
 // SetFraction sets what fraction of available width to draw (0–1).
 // Default is 1.0 (full width). Use with SetAlign to position shorter rules.
 func (ls *LineSeparator) SetFraction(f float64) *LineSeparator {

@@ -83,9 +83,9 @@ func (c *converter) walkChildren(n *html.Node, parentStyle computedStyle) []layo
 			continue
 		}
 		flushInline()
-		for _, e := range c.convertNode(child, parentStyle) {
-			appendBlock(e)
-		}
+		childElems := c.convertNode(child, parentStyle)
+		prevMarginBottom = collapseChildMargins(prevMarginBottom, childElems)
+		elems = append(elems, childElems...)
 	}
 	flushInline()
 	return elems
@@ -158,9 +158,7 @@ func collapseMargins(prevAfter float64, e layout.Element) float64 {
 				collapsed := math.Max(prevAfter, before)
 				reduction := prevAfter + before - collapsed
 				if reduction > 0 {
-					if setter, ok2 := e.(interface{ SetSpaceBefore(float64) }); ok2 {
-						setter.SetSpaceBefore(before - reduction)
-					}
+					setSpaceBefore(e, before-reduction)
 				}
 			}
 		}
@@ -169,6 +167,49 @@ func collapseMargins(prevAfter float64, e layout.Element) float64 {
 		return sa.GetSpaceAfter()
 	}
 	return 0
+}
+
+// collapseChildMargins collapses the margins between prevAfter and the
+// elements one child node converted to, returning the new prevAfter.
+//
+// Only the FIRST element is collapsed against prevAfter. When a child
+// converts to several elements (an unstyled wrapper such as <body> or a
+// bare <div> is flattened into its children), those were already
+// collapsed against each other by the child's own walkChildren; collapsing
+// them again here would subtract the shared margin a second time at every
+// nesting level, leaving no gap at all.
+func collapseChildMargins(prevAfter float64, elems []layout.Element) float64 {
+	for i, e := range elems {
+		if i == 0 {
+			prevAfter = collapseMargins(prevAfter, e)
+			continue
+		}
+		prevAfter = 0
+		if sa, ok := e.(interface{ GetSpaceAfter() float64 }); ok {
+			prevAfter = sa.GetSpaceAfter()
+		}
+	}
+	return prevAfter
+}
+
+// setSpaceBefore sets e's SpaceBefore. The layout setters return their
+// receiver for chaining (*Div.SetSpaceBefore(float64) *Div, …), so no
+// single method-set interface matches them all: an assertion to
+// interface{ SetSpaceBefore(float64) } never succeeds, which silently
+// disabled margin collapsing for every element type.
+func setSpaceBefore(e layout.Element, pts float64) {
+	switch v := e.(type) {
+	case *layout.Div:
+		v.SetSpaceBefore(pts)
+	case *layout.Paragraph:
+		v.SetSpaceBefore(pts)
+	case *layout.Flex:
+		v.SetSpaceBefore(pts)
+	case *layout.Grid:
+		v.SetSpaceBefore(pts)
+	case *layout.LineSeparator:
+		v.SetSpaceBefore(pts)
+	}
 }
 
 // convertNode converts a single HTML node into zero or more layout elements.
