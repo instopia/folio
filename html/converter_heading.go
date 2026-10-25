@@ -35,6 +35,11 @@ func (c *converter) convertHeading(n *html.Node, style computedStyle, level layo
 	}
 	// Replace the default run with the fully styled runs from collectRuns.
 	h.SetRuns(runs)
+	// The box is CSS's: the UA heading margins are already CSS margins
+	// (applied by the wrapper below), so no extra level-based space, and
+	// the line height is the computed line-height, as for a paragraph.
+	h.SetSpacing(0)
+	h.SetLeading(style.LineHeight)
 	h.SetAlign(resolveTextAlign(style))
 	if style.BookmarkLevelSet {
 		h.SetBookmarkLevel(style.BookmarkLevel)

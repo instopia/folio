@@ -42,6 +42,7 @@ type Heading struct {
 	bookmarkClosed bool              // CSS bookmark-state: closed (collapsed in viewer)
 	stringSets     map[string]string // CSS string-set values to capture
 	continuation   bool              // true for the overflow half of a split heading
+	spacing        *float64          // space above; nil = half the level's default size
 }
 
 // NewHeading creates a heading using a standard font.
@@ -84,6 +85,29 @@ func (h *Heading) SetRuns(runs []TextRun) *Heading {
 func (h *Heading) SetAlign(a Align) *Heading {
 	h.para.SetAlign(a)
 	return h
+}
+
+// SetSpacing replaces the space above the heading, which defaults to half
+// its level's default font size. Callers that position headings by other
+// means — the HTML converter applies CSS margins — set it to 0.
+func (h *Heading) SetSpacing(pts float64) *Heading {
+	h.spacing = &pts
+	return h
+}
+
+// SetLeading sets the line height as a multiple of the font size (CSS
+// line-height), as Paragraph.SetLeading.
+func (h *Heading) SetLeading(l float64) *Heading {
+	h.para.SetLeading(l)
+	return h
+}
+
+// spaceAbove is the space above the heading (see SetSpacing).
+func (h *Heading) spaceAbove() float64 {
+	if h.spacing != nil {
+		return *h.spacing
+	}
+	return headingSize(h.level) * 0.5
 }
 
 // SetBookmarkLevel overrides the auto-detected heading level for bookmark
@@ -131,9 +155,8 @@ func (h *Heading) Layout(maxWidth float64) []Line {
 		return nil
 	}
 
-	// Add spacing above the heading (half the font size).
-	spacing := headingSize(h.level) * 0.5
-	lines[0].SpaceBefore += spacing
+	// Add spacing above the heading (half the font size by default).
+	lines[0].SpaceBefore += h.spaceAbove()
 
 	// Keep the last heading line with the next element (don't orphan headings).
 	lines[len(lines)-1].KeepWithNext = true
@@ -200,7 +223,7 @@ func (h *Heading) PlanLayout(area LayoutArea) LayoutPlan {
 	// lines on subsequent pages.
 	spacing := 0.0
 	if !h.continuation {
-		spacing = headingSize(h.level) * 0.5
+		spacing = h.spaceAbove()
 	}
 
 	// Note: the Consumed <= area.Height bound is only tight for
