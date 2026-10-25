@@ -234,6 +234,10 @@ func (c *converter) applyTagDefaults(n *html.Node, style *computedStyle) {
 	case atom.Code:
 		style.FontFamily = "courier"
 		style.Display = "inline"
+	case atom.Th:
+		// UA stylesheet: th { font-weight: bold }. Applied before the
+		// cascade so `th { font-weight: normal }` wins.
+		style.FontWeight = 700
 	case atom.Font:
 		// Legacy <font> is an inline element; its color/face/size
 		// attributes are presentational hints (presentationalHints).
