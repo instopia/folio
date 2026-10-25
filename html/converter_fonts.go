@@ -123,7 +123,7 @@ func (c *converter) loadDefaultFont() {
 		if len(v.data) == 0 {
 			continue
 		}
-		face, err := font.ParseFontForLanguage(v.data, c.metadata.Language)
+		face, err := parseSharedFont(v.data, c.metadata.Language)
 		if err != nil {
 			c.reportAssetError("DefaultFont", err, "variant", v.name)
 			continue
@@ -144,7 +144,7 @@ func (c *converter) fallbackFaces() []*font.EmbeddedFont {
 	}
 	c.fallbackChainLoaded = true
 	for i, data := range c.opts.FallbackFonts {
-		face, err := font.ParseFontForLanguage(data, c.metadata.Language)
+		face, err := parseSharedFont(data, c.metadata.Language)
 		if err != nil {
 			c.reportAssetError("FallbackFonts", err, "index", i)
 			continue
