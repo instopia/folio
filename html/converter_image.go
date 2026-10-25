@@ -30,7 +30,7 @@ func (c *converter) convertImage(n *html.Node, style computedStyle) []layout.Ele
 
 	// Check if src references an SVG file — route to SVG converter.
 	if isSVGSource(src) {
-		return c.convertImgSVG(src, alt, style)
+		return c.convertImgSVG(src, alt, hasAttr(n, "alt"), style)
 	}
 
 	// Load image: data URI, HTTP URL, or local path.
@@ -45,10 +45,7 @@ func (c *converter) convertImage(n *html.Node, style computedStyle) []layout.Ele
 	}
 	if err != nil {
 		c.reportAssetError("image", err, "src", src)
-		if alt != "" {
-			return c.altTextFallback(alt, style)
-		}
-		return c.altTextFallback("[image: "+src+"]", style)
+		return c.brokenImage(src, alt, hasAttr(n, "alt"), style)
 	}
 
 	ie := layout.NewImageElement(img)
@@ -261,7 +258,7 @@ func isSVGSource(src string) bool {
 // layout element. On any failure it logs a warning and falls back to the alt
 // text (or a "[image: src]" placeholder when alt is empty), matching the
 // raster <img> failure path.
-func (c *converter) convertImgSVG(src, alt string, style computedStyle) []layout.Element {
+func (c *converter) convertImgSVG(src, alt string, altPresent bool, style computedStyle) []layout.Element {
 	var svgData []byte
 	var err error
 
@@ -304,8 +301,21 @@ func (c *converter) convertImgSVG(src, alt string, style computedStyle) []layout
 	}
 
 	c.reportAssetError("SVG image", err, "src", src)
-	if alt != "" {
+	return c.brokenImage(src, alt, altPresent, style)
+}
+
+// brokenImage is what an image that failed to load renders as: its alt
+// text; nothing when alt is present but empty (a decorative image, HTML
+// §4.8.4.4 — the URL must not print into the document); otherwise a
+// "[image: src]" placeholder, with a data: URI's payload left out.
+func (c *converter) brokenImage(src, alt string, altPresent bool, style computedStyle) []layout.Element {
+	switch {
+	case alt != "":
 		return c.altTextFallback(alt, style)
+	case altPresent:
+		return nil
+	case strings.HasPrefix(strings.ToLower(src), "data:"):
+		return c.altTextFallback("[image]", style)
 	}
 	return c.altTextFallback("[image: "+src+"]", style)
 }
