@@ -238,6 +238,15 @@ func (c *converter) applyTagDefaults(n *html.Node, style *computedStyle) {
 		// UA stylesheet: th { font-weight: bold }. Applied before the
 		// cascade so `th { font-weight: normal }` wins.
 		style.FontWeight = 700
+		// HTML §15.3.8: a <th> whose parent's computed text-align is the
+		// initial value is centered (UA rule, below the cascade, so a
+		// text-align or align="" on the cell wins). A parent that set an
+		// alignment (CSS or align="" on the <tr>) is inherited instead.
+		if !style.TextAlignSet {
+			style.TextAlign = layout.AlignCenter
+			style.TextAlignKeyword = ""
+			style.TextAlignSet = true // paragraphs only align when set
+		}
 	case atom.Font:
 		// Legacy <font> is an inline element; its color/face/size
 		// attributes are presentational hints (presentationalHints).

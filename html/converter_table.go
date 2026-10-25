@@ -393,25 +393,8 @@ func (c *converter) convertTableRowKind(n *html.Node, tbl *layout.Table, parentS
 
 		cellStyle := c.computeElementStyle(child, rowStyle)
 
-		// <th> is bold by default; that is a UA-stylesheet rule
-		// (th { font-weight: bold }) applied in applyTagDefaults, so an
-		// author's font-weight on the cell overrides it.
-		if child.DataAtom == atom.Th {
-			// Default <th> alignment is center when the author hasn't
-			// explicitly chosen left. Use resolveTextAlign so the
-			// direction-relative `start`/`end` keywords are honoured
-			// before the equality check (otherwise an RTL document
-			// with `text-align: start` would resolve to AlignLeft and
-			// then get unexpectedly re-aligned to center).
-			//
-			// Self-only flag: the UA default outranks an inherited
-			// alignment, so a <th> under a `text-align: left` ancestor
-			// still centers — only a declaration on the cell keeps left.
-			if !cellStyle.TextAlignSelfSet && resolveTextAlign(cellStyle) == layout.AlignLeft {
-				cellStyle.TextAlign = layout.AlignCenter
-				cellStyle.TextAlignKeyword = ""
-			}
-		}
+		// <th>'s bold and centered defaults are UA-stylesheet rules
+		// applied in applyTagDefaults, so author CSS overrides them.
 
 		cellElems := c.walkChildren(child, cellStyle)
 
