@@ -113,6 +113,13 @@ type syntheticCFFOptions struct {
 	charsetOverride    int32
 	useCharsetOverride bool
 
+	// charsetCIDs, when non-nil, gives the CID of each glyph 1..
+	// numGlyphs-1 (length numGlyphs-1) in the format 0 charset. When
+	// nil the charset is the identity (GID n = CID n). Real CJK OTFs
+	// carry non-identity charsets, which the embedder must not leak
+	// into the PDF.
+	charsetCIDs []int
+
 	// charStrings, when non-nil, replaces the default one-endchar-
 	// per-glyph charstrings. Length must equal numGlyphs. Used by
 	// subset tests to distinguish "kept verbatim" from "replaced
@@ -296,10 +303,17 @@ func buildSyntheticCIDKeyedCFF(t fixtureT, opts syntheticCFFOptions) []byte {
 	// Global Subr INDEX.
 	out = append(out, globalSubrPayload...)
 
-	// Charset format 0: SIDs for glyphs 1..numGlyphs-1.
+	// Charset format 0: CIDs for glyphs 1..numGlyphs-1.
+	if opts.charsetCIDs != nil && len(opts.charsetCIDs) != opts.numGlyphs-1 {
+		t.Fatalf("synthetic: charsetCIDs length %d != numGlyphs-1 %d", len(opts.charsetCIDs), opts.numGlyphs-1)
+	}
 	out = append(out, 0x00)
 	for i := 1; i < opts.numGlyphs; i++ {
-		out = append(out, byte(i>>8), byte(i&0xFF))
+		cid := i
+		if opts.charsetCIDs != nil {
+			cid = opts.charsetCIDs[i-1]
+		}
+		out = append(out, byte(cid>>8), byte(cid&0xFF))
 	}
 
 	// FDSelect: format 0 by default, or format 3 when ranges given.

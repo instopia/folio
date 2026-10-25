@@ -16,8 +16,10 @@ import (
 // (.notdef) is always retained.
 //
 // The output preserves source-byte layout for sections that are
-// already minimal: Header, Name INDEX, String INDEX, Charset, and
-// FDSelect are copied verbatim. The Top DICT, FDArray font dicts,
+// already minimal: Header, Name INDEX, String INDEX, and FDSelect are
+// copied verbatim. The charset is replaced by the identity (GID n ↔
+// CID n, see [identityCFFCharset]) because the PDF embedder addresses
+// glyphs by GID through Identity-H. The Top DICT, FDArray font dicts,
 // and per-FD Private DICTs are reassembled so their offset operands
 // can be rewritten — all such operands use the fixed 5-byte longint
 // encoding (29 + int32 big-endian) so section sizes are independent
@@ -61,7 +63,7 @@ func SubsetCFF(cffBytes []byte, usedGlyphs map[uint16]rune) ([]byte, error) {
 
 	// Build new CharStrings INDEX: kept GIDs verbatim, unkept GIDs
 	// replaced with a single endchar byte. The GID count is
-	// preserved so CID == GID semantics survive.
+	// preserved so the GIDs the caller already holds stay valid.
 	newCharStrings := make([][]byte, src.numGlyphs)
 	for i := range src.numGlyphs {
 		if keepGlyph[i] {
@@ -142,7 +144,17 @@ func SubsetCFF(cffBytes []byte, usedGlyphs map[uint16]rune) ([]byte, error) {
 	headerBytes := src.header
 	nameBytes := src.raw[src.nameIndex.rawStart:src.nameIndex.rawEnd]
 	stringBytes := src.raw[src.stringIndex.rawStart:src.stringIndex.rawEnd]
-	charsetBytes := src.raw[src.charsetOffset : src.charsetOffset+src.charsetSize]
+	// The charset is NOT copied: a CID-keyed font's charset maps
+	// each GID to an arbitrary CID (Noto Sans CJK's GID 1 is CID
+	// 9544), but the PDF content stream writes GIDs as Identity-H
+	// codes, and for a /CIDFontType0 font a reader resolves that
+	// CID back to a glyph through this very charset. Keeping the
+	// source charset therefore paints the wrong — usually emptied —
+	// glyph, so CJK text prints blank. The identity charset makes
+	// CID == GID, which is what the content stream, /W and the
+	// ToUnicode CMap all assume. FDSelect is GID-indexed and needs
+	// no change.
+	charsetBytes := identityCFFCharset(src.numGlyphs)
 	fdSelectBytes := src.raw[src.fdSelectOffset : src.fdSelectOffset+src.fdSelectSize]
 
 	// Layout pass: compute absolute offsets for each section in the
@@ -230,6 +242,19 @@ func SubsetCFF(cffBytes []byte, usedGlyphs map[uint16]rune) ([]byte, error) {
 		return nil, fmt.Errorf("font: subset cff: assembled %d bytes, expected %d: %w", len(out), finalSize, ErrCorruptTable)
 	}
 	return out, nil
+}
+
+// identityCFFCharset returns a CID-keyed charset (TN #5176 §13) for
+// numGlyphs glyphs that maps every GID to the CID of the same value.
+// GID 0 (.notdef, CID 0) is implicit; the rest is one format 2 range
+// starting at CID 1. numGlyphs is bounded by the CharStrings INDEX
+// count (uint16), so nLeft always fits format 2's uint16.
+func identityCFFCharset(numGlyphs int) []byte {
+	if numGlyphs <= 1 {
+		return []byte{0} // format 0 with no entries
+	}
+	nLeft := numGlyphs - 2
+	return []byte{2, 0, 1, byte(nLeft >> 8), byte(nLeft)}
 }
 
 // fdForGlyph reads the FDSelect table to find which FD owns gid. Only

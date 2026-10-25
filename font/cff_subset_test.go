@@ -113,6 +113,92 @@ func TestSubsetCFFRejectsNonCIDKeyed(t *testing.T) {
 	}
 }
 
+// cffCharsetCIDs decodes a parsed CFF's charset (formats 0, 1, 2) into
+// the CID of every GID; index 0 is .notdef's implicit CID 0.
+func cffCharsetCIDs(t *testing.T, c *cffFont) []int {
+	t.Helper()
+	cids := make([]int, 1, c.numGlyphs)
+	raw := c.raw[c.charsetOffset : c.charsetOffset+c.charsetSize]
+	u16 := func(b []byte) int { return int(b[0])<<8 | int(b[1]) }
+	switch raw[0] {
+	case 0:
+		for p := 1; p+1 < len(raw); p += 2 {
+			cids = append(cids, u16(raw[p:]))
+		}
+	case 1, 2:
+		step := 3
+		if raw[0] == 2 {
+			step = 4
+		}
+		for p := 1; p+step <= len(raw); p += step {
+			first, nLeft := u16(raw[p:]), int(raw[p+2])
+			if raw[0] == 2 {
+				nLeft = u16(raw[p+2:])
+			}
+			for k := 0; k <= nLeft; k++ {
+				cids = append(cids, first+k)
+			}
+		}
+	default:
+		t.Fatalf("charset format %d", raw[0])
+	}
+	if len(cids) != c.numGlyphs {
+		t.Fatalf("charset covers %d glyphs, want %d", len(cids), c.numGlyphs)
+	}
+	return cids
+}
+
+// TestSubsetCFFWritesIdentityCharset: the PDF content stream addresses
+// a /CIDFontType0 font's glyphs by GID (Identity-H), and readers turn
+// that CID into a glyph through the embedded CFF's charset. A source
+// charset with arbitrary CIDs (every CJK OTF: Noto Sans SC's GID 1 is
+// CID 9544) must therefore be replaced by the identity, or each glyph
+// resolves to a wrong — usually emptied — slot and prints blank.
+func TestSubsetCFFWritesIdentityCharset(t *testing.T) {
+	const n = 8
+	cff := buildSyntheticCIDKeyedCFF(t, syntheticCFFOptions{
+		numGlyphs:   n,
+		fdCount:     2,
+		charsetCIDs: []int{9544, 9749, 9896, 10186, 10909, 31701, 43135},
+	})
+	src, err := parseCFF(cff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cffCharsetCIDs(t, src)[1]; got != 9544 {
+		t.Fatalf("fixture GID 1 = CID %d, want 9544", got)
+	}
+
+	for _, used := range []map[uint16]rune{{3: 'A', 7: 'B'}, {}, {1: 'a', 2: 'b', 3: 'c', 4: 'd', 5: 'e', 6: 'f', 7: 'g'}} {
+		subset, err := SubsetCFF(cff, used)
+		if err != nil {
+			t.Fatalf("SubsetCFF: %v", err)
+		}
+		parsed, err := parseCFF(subset)
+		if err != nil {
+			t.Fatalf("re-parse subset: %v", err)
+		}
+		for gid, cid := range cffCharsetCIDs(t, parsed) {
+			if cid != gid {
+				t.Errorf("used %v: subset GID %d maps to CID %d, want identity", used, gid, cid)
+			}
+		}
+	}
+}
+
+// TestIdentityCFFCharset covers the degenerate sizes.
+func TestIdentityCFFCharset(t *testing.T) {
+	if got := identityCFFCharset(1); !bytes.Equal(got, []byte{0}) {
+		t.Errorf("1 glyph: %v", got)
+	}
+	if got := identityCFFCharset(2); !bytes.Equal(got, []byte{2, 0, 1, 0, 0}) {
+		t.Errorf("2 glyphs: %v", got)
+	}
+	if got := identityCFFCharset(65535); !bytes.Equal(got, []byte{2, 0, 1, 0xFF, 0xFD}) {
+		t.Errorf("65535 glyphs: %v", got)
+	}
+}
+
 // TestSubsetCFFRealFontSize is the regression test for issue #295.
 // Subset a CID-keyed CFF (Hiragino on macOS, NotoSansCJK on Linux) to
 // a single CJK glyph and assert the result is dramatically smaller

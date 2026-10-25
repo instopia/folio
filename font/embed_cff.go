@@ -19,19 +19,19 @@ import (
 //     streams).
 //  2. The descendant CIDFont has `/Subtype /CIDFontType0` (CFF
 //     outlines) rather than `/CIDFontType2` (TrueType outlines).
-//  3. `/CIDToGIDMap` is omitted: CFF's intrinsic charset already maps
-//     CIDs to glyph slots, so the explicit GID map is meaningless and
-//     PDF readers reject it on /CIDFontType0.
+//  3. `/CIDToGIDMap` is omitted: it is defined only for /CIDFontType2.
+//     A /CIDFontType0 reader maps each CID to a glyph through the
+//     embedded CFF's charset instead, so [SubsetCFF] rewrites that
+//     charset to the identity — the content stream writes GIDs as
+//     Identity-H codes, and the source font's own CIDs (arbitrary in
+//     any CJK OTF) would select the wrong glyphs.
 //
 // `/W`, the ToUnicode CMap, the Type0 wrapper, `/Encoding /Identity-H`,
 // and the `Adobe-Identity-0` ordering are reused unchanged from the
 // TrueType path so that text shaping, copy/paste, and accessibility
 // behave identically across outline formats.
 //
-// During Phase 1 the CFF bytes are embedded unmodified — equivalent to
-// the existing fallback behavior of [Subset] for unsupported formats,
-// but with the correct PDF object graph. Phase 3+ replaces the
-// `cffData` payload with a subset CFF blob.
+// The `cffData` payload is replaced by a [SubsetCFF] blob.
 func (ef *EmbeddedFont) buildObjectsCFF(cffData []byte, addObject func(core.PdfObject) *core.PdfIndirectReference) *core.PdfDictionary {
 	face := ef.face
 	psName := sanitizePSName(face.PostScriptName())
@@ -45,10 +45,11 @@ func (ef *EmbeddedFont) buildObjectsCFF(cffData []byte, addObject func(core.PdfO
 	maps.Copy(glyphs, ef.usedGlyphs)
 
 	// Subset the CFF down to the used charstrings + their reachable
-	// subroutines. On failure we fall back to embedding the source
-	// bytes unchanged — that produces a much larger but structurally
-	// valid PDF, matching the TrueType path's silent-fallback policy
-	// at font/embed.go:167. The single PSName / BaseFont / FontName
+	// subroutines, with an identity charset. On failure we fall back
+	// to embedding the source bytes unchanged — a much larger but
+	// structurally valid PDF, matching the TrueType path's silent-
+	// fallback policy; it renders correctly only when the source
+	// charset is already the identity (GID == CID). The single PSName / BaseFont / FontName
 	// triplet must all carry the same "XXXXXX+" prefix when subsetting
 	// succeeds, per ISO 32000-1 §9.6.4.
 	if subsetData, err := SubsetCFF(cffData, glyphs); err == nil {
