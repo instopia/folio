@@ -10,6 +10,7 @@ import (
 	"github.com/carlos7ags/folio/layout"
 
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // convertGrid converts a display:grid container into a layout.Grid.
@@ -156,8 +157,25 @@ func (c *converter) convertGrid(n *html.Node, style computedStyle) []layout.Elem
 		if !blockified {
 			childElems = c.convertNode(child, style)
 		}
-		if len(childElems) == 0 {
-			continue
+		// One grid item per child box (CSS Grid §6.1): a child that
+		// converted to several elements (an unstyled <div> flattened into
+		// its blocks) is wrapped back into one item rather than taking a
+		// cell per block, and an empty in-flow element still takes its
+		// cell (an empty first column keeps the second where it is).
+		switch {
+		case len(childElems) > 1:
+			wrapper := layout.NewDiv()
+			for _, ce := range childElems {
+				wrapper.Add(ce)
+			}
+			childElems = []layout.Element{wrapper}
+		case len(childElems) == 0:
+			if child.Type != html.ElementNode || childStyle.Display == "none" ||
+				childStyle.Position == "absolute" || childStyle.Position == "fixed" ||
+				!rendersBox(child) {
+				continue
+			}
+			childElems = []layout.Element{layout.NewDiv()}
 		}
 
 		for _, elem := range childElems {
@@ -469,4 +487,16 @@ func parseGridLine(val string) (start, end int) {
 	}
 
 	return start, end
+}
+
+// rendersBox reports whether an element generates a box at all; script,
+// style and the other metadata elements never do (they are display:none
+// in every UA stylesheet), so an empty one must not take a grid cell.
+func rendersBox(n *html.Node) bool {
+	switch n.DataAtom {
+	case atom.Script, atom.Style, atom.Template, atom.Link, atom.Meta,
+		atom.Title, atom.Base, atom.Noscript, atom.Head:
+		return false
+	}
+	return true
 }
