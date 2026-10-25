@@ -235,20 +235,43 @@ func (c *converter) convertHr(style computedStyle) []layout.Element {
 	hr.SetSpaceBefore(style.MarginTopAt(c.containerWidth))
 	hr.SetSpaceAfter(style.MarginBottomAt(c.containerWidth))
 
-	// Apply border color if set via CSS.
-	if style.hasBorder() {
+	// A rule drawn by its border (border-top, else border-bottom) paints
+	// in that border's width, colour and style. Only a borderless <hr>
+	// takes an explicit text colour or background — an inherited
+	// body { color } must not recolour a border the author coloured.
+	switch {
+	case style.BorderTopWidth > 0:
 		hr.SetWidth(style.BorderTopWidth)
 		hr.SetColor(style.BorderTopColor)
-	}
-	// Apply explicit color from CSS.
-	if style.Color != (layout.Color{}) && style.Color != layout.ColorBlack {
-		hr.SetColor(style.Color)
-	}
-	if style.BackgroundColor != nil {
-		hr.SetColor(*style.BackgroundColor)
+		hr.SetStyle(hrLineStyle(style.BorderTopStyle))
+	case style.BorderBottomWidth > 0:
+		hr.SetWidth(style.BorderBottomWidth)
+		hr.SetColor(style.BorderBottomColor)
+		hr.SetStyle(hrLineStyle(style.BorderBottomStyle))
+	case style.hasBorder():
+		hr.SetWidth(max(style.BorderLeftWidth, style.BorderRightWidth))
+		hr.SetColor(style.BorderLeftColor)
+	default:
+		if style.Color != (layout.Color{}) && style.Color != layout.ColorBlack {
+			hr.SetColor(style.Color)
+		}
+		if style.BackgroundColor != nil {
+			hr.SetColor(*style.BackgroundColor)
+		}
 	}
 
 	return []layout.Element{hr}
+}
+
+// hrLineStyle maps a CSS border style to the rule's stroke.
+func hrLineStyle(s string) layout.BorderStyle {
+	switch s {
+	case "dashed":
+		return layout.BorderDashed
+	case "dotted":
+		return layout.BorderDotted
+	}
+	return layout.BorderSolid
 }
 
 // convertPre handles <pre> elements, preserving whitespace and line breaks.

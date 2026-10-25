@@ -56,6 +56,15 @@ func (ls *LineSeparator) SetSpaceAfter(pts float64) *LineSeparator {
 	return ls
 }
 
+// Color returns the stroke color.
+func (ls *LineSeparator) Color() Color { return ls.color }
+
+// Width returns the line width in points.
+func (ls *LineSeparator) Width() float64 { return ls.width }
+
+// Style returns the line style.
+func (ls *LineSeparator) Style() BorderStyle { return ls.style }
+
 // GetSpaceBefore returns the vertical space above the separator.
 func (ls *LineSeparator) GetSpaceBefore() float64 { return ls.spaceBefore }
 
