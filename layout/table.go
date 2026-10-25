@@ -317,6 +317,34 @@ type Table struct {
 	cachedColWidths   []float64
 	cachedColWidthsAt float64
 	colWidthsValid    bool
+
+	// cellHeights memoises cellContentHeight per (cell, span width) for
+	// the same reason: buildGrid runs on every continuation table, which
+	// carries all remaining rows, so without the memo each page re-lays
+	// out every remaining cell's content (O(rows²) for a long table).
+	// The memo is a pointer so cloneForOverflow's whole-struct copy shares
+	// it with the continuation chain; the key includes the span width, so
+	// a different layout width simply misses. Dropped (set to nil) by the
+	// same mutators that invalidate the column-width memo.
+	cellHeights *cellHeightMemo
+}
+
+// cellHeightKey identifies one measurement of a cell's content height.
+type cellHeightKey struct {
+	cell  *Cell
+	width float64
+}
+
+// cellHeightMemo is the shared height cache; see Table.cellHeights.
+type cellHeightMemo struct {
+	m map[cellHeightKey]float64
+}
+
+// invalidateSizing drops every memoised measurement (column widths and
+// cell heights). Called by mutators that can change the table's sizing.
+func (t *Table) invalidateSizing() {
+	t.colWidthsValid = false
+	t.cellHeights = nil
 }
 
 // NewTable creates a new empty table.
@@ -337,7 +365,7 @@ func (t *Table) SetColumnWidths(widths []float64) *Table {
 	t.colWidths = widths
 	t.colUnitWidths = nil
 	t.autoWidths = false
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return t
 }
 
@@ -428,7 +456,7 @@ func (t *Table) totalSpacingH(nCols int) float64 {
 // expanded proportionally to fill the minimum width.
 func (t *Table) SetMinWidth(pts float64) *Table {
 	t.minWidth = pts
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return t
 }
 
@@ -436,7 +464,7 @@ func (t *Table) SetMinWidth(pts float64) *Table {
 // lazily at layout time. Use Pct(100) for width:100%.
 func (t *Table) SetMinWidthUnit(u UnitValue) *Table {
 	t.minWidthUnit = &u
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return t
 }
 
@@ -449,7 +477,7 @@ func (t *Table) SetAutoColumnWidths() *Table {
 	t.autoWidths = true
 	t.colWidths = nil
 	t.colUnitWidths = nil
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return t
 }
 
@@ -464,7 +492,7 @@ func (t *Table) SetColumnUnitWidths(widths []UnitValue) *Table {
 	t.colUnitWidths = widths
 	t.colWidths = nil
 	t.autoWidths = false
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return t
 }
 
@@ -472,7 +500,7 @@ func (t *Table) SetColumnUnitWidths(widths []UnitValue) *Table {
 func (t *Table) AddRow() *Row {
 	r := &Row{}
 	t.rows = append(t.rows, r)
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return r
 }
 
@@ -481,7 +509,7 @@ func (t *Table) AddRow() *Row {
 func (t *Table) AddHeaderRow() *Row {
 	r := &Row{isHeader: true}
 	t.rows = append(t.rows, r)
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return r
 }
 
@@ -490,7 +518,7 @@ func (t *Table) AddHeaderRow() *Row {
 func (t *Table) AddFooterRow() *Row {
 	r := &Row{isFooter: true}
 	t.rows = append(t.rows, r)
-	t.colWidthsValid = false
+	t.invalidateSizing()
 	return r
 }
 
@@ -968,9 +996,23 @@ func spanGroupStarts(grid []gridRow) []int {
 	return starts
 }
 
-// cellContentHeight computes the height needed for a cell's content.
-// For Element cells, it also caches the laid-out lines in gc.
+// cellContentHeight returns the height needed for a cell's content,
+// memoised per (cell, span width) in t.cellHeights.
 func (t *Table) cellContentHeight(gc *gridCell) float64 {
+	if t.cellHeights == nil {
+		t.cellHeights = &cellHeightMemo{m: make(map[cellHeightKey]float64)}
+	}
+	key := cellHeightKey{cell: gc.cell, width: gc.spanWidth}
+	if h, ok := t.cellHeights.m[key]; ok {
+		return h
+	}
+	h := t.cellContentHeightUncached(gc)
+	t.cellHeights.m[key] = h
+	return h
+}
+
+// cellContentHeightUncached computes the height needed for a cell's content.
+func (t *Table) cellContentHeightUncached(gc *gridCell) float64 {
 	cell := gc.cell
 	padH := cell.padTop() + cell.padBottom()
 	innerWidth := gc.spanWidth - cell.padLeft() - cell.padRight()
@@ -1052,21 +1094,92 @@ func (t *Table) Layout(maxWidth float64) []Line {
 	return lines
 }
 
+// tablePlanWindowRows is the initial number of body rows PlanLayout lays
+// out when looking for a page break; the window doubles until the break
+// is found well inside it (or it covers the whole table).
+const tablePlanWindowRows = 64
+
 // PlanLayout implements Element. Tables split between rows — never inside a
 // rowspan group — repeating header rows on each new page.
+//
+// A continuation table carries every remaining row, so building the grid
+// for the whole table on every page would make a long table quadratic in
+// its row count. Instead the page is planned against a window of the
+// leading header rows, the first k body rows and the trailing footer
+// rows, with k doubling until the split lands strictly before the last
+// span group in the window — at which point every row that renders, its
+// span group and its border neighbors are identical to the full grid's,
+// so the plan is the same as planning the whole table.
 func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 	if area.Height <= 0 {
 		return LayoutPlan{Status: LayoutNothing}
 	}
 
 	colWidths := t.resolveColWidths(area.Width)
-	grid := t.buildGrid(colWidths)
+	if t.cellHeights == nil {
+		// Allocate before cloning windows so they share the memo.
+		t.cellHeights = &cellHeightMemo{m: make(map[cellHeightKey]float64)}
+	}
+
+	nHeader := 0
+	for nHeader < len(t.rows) && t.rows[nHeader].isHeader {
+		nHeader++
+	}
+	nFooter := 0
+	for nFooter < len(t.rows)-nHeader && t.rows[len(t.rows)-1-nFooter].isFooter {
+		nFooter++
+	}
+	nBody := len(t.rows) - nHeader - nFooter
+
+	// Footer rows are laid out (and, under border-collapse, resolved)
+	// against the table's last body row, so a window keeps that row too.
+	// That is only exact when no rowspan reaches into or out of it;
+	// otherwise fall back to planning the whole table.
+	var tail []*Row
+	canWindow := nBody > tablePlanWindowRows
+	if canWindow && nFooter > 0 {
+		body := t.rows[nHeader : nHeader+nBody]
+		for i, row := range body {
+			for _, c := range row.cells {
+				if c.rowspan > len(body)-1-i && c.rowspan > 1 {
+					canWindow = false
+				}
+			}
+		}
+		tail = body[nBody-1:]
+	}
+
+	if canWindow {
+		for k := tablePlanWindowRows; k < nBody-len(tail); k *= 2 {
+			window := t.cloneForOverflow()
+			window.rows = make([]*Row, 0, nHeader+k+len(tail)+nFooter)
+			window.rows = append(window.rows, t.rows[:nHeader]...)
+			window.rows = append(window.rows, t.rows[nHeader:nHeader+k]...)
+			window.rows = append(window.rows, tail...)
+			window.rows = append(window.rows, t.rows[len(t.rows)-nFooter:]...)
+			if plan, ok := t.planGrid(window, area, colWidths, len(tail)); ok {
+				return plan
+			}
+		}
+	}
+	plan, _ := t.planGrid(t, area, colWidths, -1)
+	return plan
+}
+
+// planGrid plans src (t itself, or a window of t's rows built by
+// PlanLayout) and builds the overflow table from t's full row list.
+// windowTail is -1 when src is t; otherwise src is a window whose body
+// ends with windowTail rows copied from the end of t's body, and planGrid
+// reports ok=false — the caller retries with a larger window — unless
+// the split provably matches the full table's.
+func (t *Table) planGrid(src *Table, area LayoutArea, colWidths []float64, windowTail int) (LayoutPlan, bool) {
+	grid := src.buildGrid(colWidths)
 	if len(grid) == 0 {
-		return LayoutPlan{Status: LayoutFull}
+		return LayoutPlan{Status: LayoutFull}, true
 	}
 
 	// Apply border-collapse: resolve competing borders on shared cell edges.
-	if t.borderCollapse {
+	if src.borderCollapse {
 		resolveBorders(grid, len(colWidths))
 	}
 
@@ -1099,7 +1212,7 @@ func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 
 	bodyEnd := len(grid) - footerRowCount // index where body rows end
 
-	sv := t.effectiveSpacingV()
+	sv := src.effectiveSpacingV()
 
 	// Build blocks row by row, checking height.
 	var blocks []PlacedBlock
@@ -1191,7 +1304,7 @@ func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 		capturedRowIdx := i
 		capturedColWidths := colWidths
 		capturedMaxW := area.Width
-		capturedTable := t
+		capturedTable := src
 		capturedCapRows := 0
 		if i == oversizeGroupLeader {
 			// This leader's group will be split before oversizeGroupEnd
@@ -1229,7 +1342,7 @@ func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 			capturedRowIdx := i
 			capturedColWidths := colWidths
 			capturedMaxW := area.Width
-			capturedTable := t
+			capturedTable := src
 
 			blocks = append(blocks, PlacedBlock{
 				X: 0, Y: curY, Width: area.Width, Height: gr.height,
@@ -1263,12 +1376,34 @@ func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 	// and when already at the top of a page (a header+row taller than a whole
 	// page), the renderer force-places it, so pagination cannot loop. Guarded
 	// on there being body rows so a header/footer-only table still lays out.
+	if windowTail >= 0 {
+		// The window's last (prefix) body row may belong to a span group
+		// the window truncates, and it borders the tail/footer rather than
+		// the next body row. Only a split strictly before that group, with
+		// no oversize group reaching into it, is known to match the full
+		// table; the group must also be closed so its spans don't leak
+		// into the tail or footer rows. Everything else — including "all
+		// rows fit" — needs a larger window.
+		prefixEnd := bodyEnd - windowTail
+		lastGroupStart := groupStarts[prefixEnd-1]
+		if splitIdx >= lastGroupStart || oversizeGroupEnd > lastGroupStart {
+			return LayoutPlan{}, false
+		}
+		for r := lastGroupStart; r < prefixEnd; r++ {
+			for _, gc := range grid[r].cells {
+				if r+gc.cell.rowspan > prefixEnd {
+					return LayoutPlan{}, false
+				}
+			}
+		}
+	}
+
 	if splitIdx <= headerRowCount && headerRowCount < bodyEnd {
-		return LayoutPlan{Status: LayoutNothing}
+		return LayoutPlan{Status: LayoutNothing}, true
 	}
 
 	if splitIdx >= bodyEnd {
-		return LayoutPlan{Status: LayoutFull, Consumed: curY, Blocks: wrapBlocks(blocks, curY)}
+		return LayoutPlan{Status: LayoutFull, Consumed: curY, Blocks: wrapBlocks(blocks, curY)}, true
 	}
 
 	// Build overflow table with header + footer rows + remaining data rows.
@@ -1310,7 +1445,7 @@ func (t *Table) PlanLayout(area LayoutArea) LayoutPlan {
 
 	return LayoutPlan{
 		Status: LayoutPartial, Consumed: curY, Blocks: wrapBlocks(blocks, curY), Overflow: overflowTable,
-	}
+	}, true
 }
 
 // tableRowRef is internal data attached to a Line so the renderer

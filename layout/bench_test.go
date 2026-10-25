@@ -4,6 +4,7 @@
 package layout
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -166,5 +167,46 @@ func BenchmarkBreakLongWordsIndic(b *testing.B) {
 		if len(chunks) == 0 {
 			b.Fatal("breakLongWords returned no chunks")
 		}
+	}
+}
+
+// BenchmarkTableMultiPageScaling drives a long table through the full
+// overflow chain at several row counts, with Element (Paragraph) cells as
+// the HTML converter produces them. Each continuation table carries every
+// remaining row, so any per-page work proportional to the remaining rows
+// makes the whole chain quadratic; ns/op should grow roughly linearly with
+// the row count.
+func BenchmarkTableMultiPageScaling(b *testing.B) {
+	for _, n := range []int{250, 1000, 2000, 4000} {
+		b.Run(fmt.Sprintf("rows=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				tbl := NewTable()
+				tbl.SetAutoColumnWidths()
+				h := tbl.AddHeaderRow()
+				h.AddCell("Date", font.HelveticaBold, 10)
+				h.AddCell("Description", font.HelveticaBold, 10)
+				h.AddCell("Amount", font.HelveticaBold, 10)
+				for i := range n {
+					row := tbl.AddRow()
+					row.AddCell("2026-10-25", font.Helvetica, 10)
+					row.AddCellElement(NewParagraph(fmt.Sprintf("Line item %d premium adjustment for policy renewal", i), font.Helvetica, 10))
+					row.AddCell("$1,234.56", font.Helvetica, 10)
+				}
+				area := LayoutArea{Width: 500, Height: 700}
+				pages := 0
+				for {
+					plan := tbl.PlanLayout(area)
+					pages++
+					if plan.Status != LayoutPartial || plan.Overflow == nil {
+						break
+					}
+					tbl = plan.Overflow.(*Table)
+					if pages > 10*n {
+						b.Fatal("overflow chain not terminating")
+					}
+				}
+			}
+		})
 	}
 }
