@@ -268,10 +268,10 @@ func (c *converter) convertPre(n *html.Node, style computedStyle) []layout.Eleme
 		lines = lines[:len(lines)-1]
 	}
 
+	// No forced box: browsers give <pre> only a monospace font and
+	// margins, so background, padding and borders come from CSS alone.
 	div := layout.NewDiv()
-	div.SetPadding(6)
-	bg := layout.RGB(0.96, 0.96, 0.96)
-	div.SetBackground(bg)
+	applyDivStyles(div, style, c.containerWidth)
 
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
